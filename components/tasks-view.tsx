@@ -1,20 +1,20 @@
 "use client";
 
-import { FormEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { gsap } from "gsap";
-import { Check, Circle, Clock3, ListFilter, Plus, Search, Sparkles } from "lucide-react";
+import { Check, Circle, Clock3, ListFilter, Pencil, Plus, RotateCcw, Search, Sparkles } from "lucide-react";
 import { useRhythm } from "@/components/rhythm-provider";
-import type { TaskStatus } from "@/lib/rhythm";
+import { TaskEditor } from "@/components/task-editor";
+import type { Task, TaskDraft, TaskStatus } from "@/lib/rhythm";
 
 type Filter = "all" | TaskStatus;
 
 export function TasksView() {
   const root = useRef<HTMLDivElement>(null);
-  const { tasks, toggleTask, applyActions } = useRhythm();
+  const { tasks, toggleTask, createTask, updateTask, deleteTask, undo, canUndo } = useRhythm();
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
-  const [adding, setAdding] = useState(false);
-  const [title, setTitle] = useState("");
+  const [editorTask, setEditorTask] = useState<Task | "new" | null>(null);
 
   const visibleTasks = useMemo(() => {
     const clean = query.trim().toLowerCase();
@@ -37,20 +37,20 @@ export function TasksView() {
     return () => context.revert();
   }, []);
 
-  function addTask(event: FormEvent) {
-    event.preventDefault();
-    const clean = title.trim();
-    if (!clean) return;
-    applyActions([{ type: "create_task", taskId: null, title: clean, project: "Personal", dueLabel: "Today", estimateMinutes: 25 }]);
-    setTitle("");
-    setAdding(false);
+  function saveTask(draft: TaskDraft) {
+    if (editorTask === "new") createTask(draft);
+    else if (editorTask) updateTask(editorTask.id, draft);
+    setEditorTask(null);
   }
 
   return (
     <div className="workspace-view" ref={root}>
       <header className="workspace-header" data-workspace-reveal>
         <div><p className="eyebrow">Everything in one place</p><h1>Tasks</h1><p className="page-subtitle">A quiet inventory of what deserves your attention.</p></div>
-        <button className="primary-button" onClick={() => setAdding(true)}><Plus size={17} /> Add task</button>
+        <div className="workspace-header-actions">
+          {canUndo ? <button className="soft-button" onClick={undo}><RotateCcw size={15} /> Undo</button> : null}
+          <button className="primary-button" onClick={() => setEditorTask("new")}><Plus size={17} /> Add task</button>
+        </div>
       </header>
 
       <section className="tasks-summary" data-workspace-reveal>
@@ -78,20 +78,24 @@ export function TasksView() {
               <span className={`priority-dot priority-${task.priority}`} />
               <div><span>{task.project}</span><h2>{task.title}</h2></div>
               <p>{task.dueLabel}</p><small><Clock3 size={13} /> {task.estimateMinutes} min</small>
+              <button className="task-edit-button" onClick={() => setEditorTask(task)} aria-label={`Edit ${task.title}`}><Pencil size={15} /></button>
             </article>
           ))}
           {!visibleTasks.length ? <div className="empty-filter"><ListFilter size={18} /> No tasks match this view.</div> : null}
         </div>
       </section>
 
-      {adding ? (
-        <div className="quick-add-backdrop" role="presentation" onMouseDown={() => setAdding(false)}>
-          <form className="quick-add" onSubmit={addTask} onMouseDown={(event) => event.stopPropagation()}>
-            <span className="section-kicker">New task</span><h2>What needs doing?</h2>
-            <input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Write the task clearly" maxLength={240} aria-label="Task title" />
-            <div><button type="button" className="soft-button" onClick={() => setAdding(false)}>Cancel</button><button className="primary-button" type="submit" disabled={!title.trim()}>Add for today</button></div>
-          </form>
-        </div>
+      {editorTask ? (
+        <TaskEditor
+          key={editorTask === "new" ? "new" : editorTask.id}
+          task={editorTask === "new" ? undefined : editorTask}
+          onClose={() => setEditorTask(null)}
+          onSave={saveTask}
+          onDelete={editorTask === "new" ? undefined : () => {
+            deleteTask(editorTask.id);
+            setEditorTask(null);
+          }}
+        />
       ) : null}
     </div>
   );

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { applyAssistantActions, clampEstimateMinutes, seedTasks } from "../lib/rhythm.ts";
+import { applyAssistantActions, clampEstimateMinutes, createTaskFromDraft, seedTasks } from "../lib/rhythm.ts";
 
 test("completes a known task", () => {
   const next = applyAssistantActions(seedTasks, [
@@ -45,7 +45,27 @@ test("reschedules a known task and ignores an unknown task", () => {
     next.find((task) => task.id === "monday-meeting")?.dueLabel,
     "Tomorrow morning",
   );
+  assert.equal(next.find((task) => task.id === "monday-meeting")?.dueTime, undefined);
   assert.equal(next.length, seedTasks.length);
+});
+
+test("creates a fully scheduled task from editor data", () => {
+  const task = createTaskFromDraft({
+    title: "  Ship the release  ",
+    project: "Rhythm",
+    dueDate: "2026-08-08",
+    dueTime: "18:00",
+    estimateMinutes: 45,
+    priority: "high",
+    later: false,
+    note: "Final check",
+  }, "task-editor-test");
+
+  assert.equal(task.id, "task-editor-test");
+  assert.equal(task.title, "Ship the release");
+  assert.equal(task.dueDate, "2026-08-08");
+  assert.equal(task.dueTime, "18:00");
+  assert.equal(task.priority, "high");
 });
 
 test("creates a bounded local task", () => {

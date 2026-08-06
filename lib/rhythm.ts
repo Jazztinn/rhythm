@@ -12,6 +12,19 @@ export type Task = {
   priority: TaskPriority;
   source: TaskSource;
   later: boolean;
+  dueDate?: string;
+  dueTime?: string;
+  note?: string;
+};
+
+export type TaskDraft = {
+  title: string;
+  project: string;
+  dueDate: string;
+  dueTime: string;
+  estimateMinutes: number;
+  priority: TaskPriority;
+  later: boolean;
   note?: string;
 };
 
@@ -72,12 +85,79 @@ export function createLocalTaskId() {
   return `task-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
+export function toDateKey(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+export function addDays(date: Date, amount: number) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + amount);
+  return next;
+}
+
+export function formatTaskDue(dateKey: string, time: string, now = new Date()) {
+  const today = toDateKey(now);
+  const tomorrow = toDateKey(addDays(now, 1));
+  const label = dateKey === today
+    ? "Today"
+    : dateKey === tomorrow
+      ? "Tomorrow"
+      : new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(
+          new Date(`${dateKey}T12:00:00`),
+        );
+  if (!time) return label;
+  const timeLabel = new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(
+    new Date(`${dateKey}T${time}:00`),
+  );
+  return `${label} · ${timeLabel}`;
+}
+
+export function resolveTaskDate(task: Task, now = new Date()) {
+  if (task.dueDate) return task.dueDate;
+  const label = task.dueLabel.toLowerCase();
+  if (label.includes("tomorrow")) return toDateKey(addDays(now, 1));
+  if (label.includes("sunday")) {
+    const distance = (7 - now.getDay()) % 7 || 7;
+    return toDateKey(addDays(now, distance));
+  }
+  if (label.includes("weekend")) {
+    const distance = (6 - now.getDay() + 7) % 7;
+    return toDateKey(addDays(now, distance));
+  }
+  if (label.includes("today") || label.includes("tonight") || /\d{1,2}:\d{2}/.test(label)) {
+    return toDateKey(now);
+  }
+  return null;
+}
+
+export function createTaskFromDraft(draft: TaskDraft, id = createLocalTaskId()): Task {
+  const dueDate = draft.dueDate || toDateKey(new Date());
+  return {
+    id,
+    title: draft.title.trim(),
+    project: draft.project.trim() || "Personal",
+    dueLabel: formatTaskDue(dueDate, draft.dueTime),
+    dueDate,
+    dueTime: draft.dueTime,
+    estimateMinutes: clampEstimateMinutes(draft.estimateMinutes),
+    status: "pending",
+    priority: draft.priority,
+    source: "task",
+    later: draft.later,
+    note: draft.note?.trim() || undefined,
+  };
+}
+
 export const seedTasks: Task[] = [
   {
     id: "techforgood-mockups",
     title: "Submit TechForGood mockups",
     project: "TechForGood",
     dueLabel: "10:00 PM",
+    dueTime: "22:00",
     estimateMinutes: 35,
     status: "pending",
     priority: "high",
@@ -90,6 +170,7 @@ export const seedTasks: Task[] = [
     title: "Prepare for Monday meeting",
     project: "NEXT",
     dueLabel: "Tomorrow",
+    dueTime: "09:00",
     estimateMinutes: 25,
     status: "pending",
     priority: "medium",
@@ -102,6 +183,7 @@ export const seedTasks: Task[] = [
     title: "Reply to Casey",
     project: "NEXT · Slack",
     dueLabel: "Tonight",
+    dueTime: "18:30",
     estimateMinutes: 8,
     status: "pending",
     priority: "medium",
@@ -113,6 +195,7 @@ export const seedTasks: Task[] = [
     title: "Review competition abstract",
     project: "TechForGood",
     dueLabel: "Done at 4:20 PM",
+    dueTime: "16:20",
     estimateMinutes: 30,
     status: "completed",
     priority: "medium",
@@ -124,6 +207,7 @@ export const seedTasks: Task[] = [
     title: "Organize CS 202 notes",
     project: "University",
     dueLabel: "Done at 2:10 PM",
+    dueTime: "14:10",
     estimateMinutes: 20,
     status: "completed",
     priority: "low",
@@ -187,7 +271,12 @@ export function applyAssistantActions(
 
     return current.map((task) =>
       task.id === action.taskId
-        ? { ...task, dueLabel: action.dueLabel.trim() || task.dueLabel }
+        ? {
+            ...task,
+            dueLabel: action.dueLabel.trim() || task.dueLabel,
+            dueDate: undefined,
+            dueTime: undefined,
+          }
         : task,
     );
   }, tasks);

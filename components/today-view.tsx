@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { gsap } from "gsap";
 import {
   ArrowUpRight,
@@ -16,17 +16,7 @@ import {
 } from "lucide-react";
 import { DotNumber } from "@/components/dot-number";
 import { useRhythm } from "@/components/rhythm-provider";
-import type { Task } from "@/lib/rhythm";
-
-const week = [
-  { day: "Mon", load: 42 },
-  { day: "Tue", load: 58 },
-  { day: "Wed", load: 72 },
-  { day: "Thu", load: 36 },
-  { day: "Fri", load: 64 },
-  { day: "Sat", load: 44, active: true },
-  { day: "Sun", load: 20 },
-];
+import { addDays, resolveTaskDate, toDateKey, type Task } from "@/lib/rhythm";
 
 function TaskCard({ task, onToggle }: { task: Task; onToggle: () => void }) {
   return (
@@ -55,11 +45,21 @@ export function TodayView() {
   const root = useRef<HTMLDivElement>(null);
   const [laterOpen, setLaterOpen] = useState(false);
   const { tasks, toggleTask, reset } = useRhythm();
+  const [now, setNow] = useState(() => new Date(1704110400000));
+  useEffect(() => {
+    const timer = window.setTimeout(() => setNow(new Date()), 0);
+    const interval = window.setInterval(() => setNow(new Date()), 60_000);
+    return () => { window.clearTimeout(timer); window.clearInterval(interval); };
+  }, []);
+  const todayKey = toDateKey(now);
 
-  const todayTasks = tasks.filter((task) => !task.later);
+  const todayTasks = tasks.filter((task) => {
+    const date = resolveTaskDate(task, now);
+    return !task.later && (!date || date <= todayKey);
+  });
   const pending = todayTasks.filter((task) => task.status === "pending");
   const completed = todayTasks.filter((task) => task.status === "completed");
-  const later = tasks.filter((task) => task.later);
+  const later = tasks.filter((task) => task.later || (resolveTaskDate(task, now) ?? todayKey) > todayKey);
   const progress = todayTasks.length ? Math.round((completed.length / todayTasks.length) * 100) : 100;
   const formattedDate = useMemo(
     () =>
@@ -67,11 +67,30 @@ export function TodayView() {
         weekday: "long",
         month: "long",
         day: "numeric",
-      }).format(new Date()),
-    [],
+      }).format(now),
+    [now],
   );
-  const greeting = new Date().getHours() < 12 ? "Good morning." : new Date().getHours() < 18 ? "Good afternoon." : "Good evening.";
+  const greeting = now.getHours() < 12 ? "Good morning." : now.getHours() < 18 ? "Good afternoon." : "Good evening.";
   const visualState = pending.length <= 2 ? "is-clear" : pending.length <= 4 ? "is-steady" : "is-busy";
+  const nextScheduled = tasks
+    .filter((task) => task.status === "pending" && task.dueTime)
+    .map((task) => {
+      const date = resolveTaskDate(task, now);
+      return date ? { task, at: new Date(`${date}T${task.dueTime}:00`) } : null;
+    })
+    .filter((item): item is { task: Task; at: Date } => item !== null && item.at.getTime() >= now.getTime())
+    .sort((a, b) => a.at.getTime() - b.at.getTime())[0];
+  const freeMinutes = nextScheduled && toDateKey(nextScheduled.at) === todayKey
+    ? Math.max(0, Math.round((nextScheduled.at.getTime() - now.getTime()) / 60000))
+    : null;
+  const weekStart = addDays(now, -((now.getDay() + 6) % 7));
+  const week = Array.from({ length: 7 }, (_, index) => {
+    const date = addDays(weekStart, index);
+    const key = toDateKey(date);
+    const minutes = tasks.filter((task) => task.status === "pending" && resolveTaskDate(task, now) === key).reduce((sum, task) => sum + task.estimateMinutes, 0);
+    return { day: new Intl.DateTimeFormat("en-US", { weekday: "short" }).format(date), load: Math.min(100, Math.max(8, Math.round((minutes / 240) * 100))), minutes, active: key === todayKey };
+  });
+  const busiest = week.reduce((current, item) => item.minutes > current.minutes ? item : current, week[0]);
 
   useLayoutEffect(() => {
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
@@ -104,8 +123,8 @@ export function TodayView() {
           <p className="page-subtitle">You&apos;ve done enough to stay on track today.</p>
         </div>
         <div className="header-actions">
-          <span className="weather"><CloudSun size={17} /> 28° Manila</span>
-          <button className="soft-button" onClick={reset} title="Restore demo tasks">
+          <span className="weather"><CloudSun size={17} /> {new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(now)} local</span>
+          <button className="soft-button" onClick={reset} title="Restore starter tasks">
             <RotateCcw size={15} /> Reset day
           </button>
         </div>
@@ -139,8 +158,8 @@ export function TodayView() {
           >
             <span className="nudge-icon"><Sparkles size={17} /></span>
             <span>
-              <small>Good time to work</small>
-              <strong>You have 52 minutes free.</strong>
+              <small>{freeMinutes !== null ? "Before next task" : "A clear next move"}</small>
+              <strong>{freeMinutes !== null ? `${freeMinutes} minutes free.` : `${pending.length} task${pending.length === 1 ? "" : "s"} left today.`}</strong>
             </span>
             <ArrowUpRight size={18} />
           </Link>
@@ -148,16 +167,16 @@ export function TodayView() {
 
         <article className="window-card">
           <div className="section-kicker"><CalendarClock size={16} /> Next window</div>
-          <h2>Before NEXT sync</h2>
-          <p>One clear block, then your evening opens up.</p>
+          <h2>{nextScheduled ? `Before ${nextScheduled.task.title}` : "No fixed event ahead"}</h2>
+          <p>{nextScheduled ? "Use this open block deliberately, then stop." : "Your remaining work has no fixed start time."}</p>
           <div className="window-time">
-            <strong>52</strong>
-            <span>minutes<br />available</span>
+            <strong>{freeMinutes ?? pending.reduce((sum, task) => sum + task.estimateMinutes, 0)}</strong>
+            <span>minutes<br />{freeMinutes !== null ? "available" : "planned"}</span>
           </div>
           <div className="timeline">
             <div><i /> <span>Now</span><strong>Open</strong></div>
-            <div><i /> <span>7:30 PM</span><strong>NEXT sync</strong></div>
-            <div><i /> <span>8:15 PM</span><strong>Clear</strong></div>
+            <div><i /> <span>{nextScheduled ? new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(nextScheduled.at) : "Later"}</span><strong>{nextScheduled?.task.title ?? "Flexible"}</strong></div>
+            <div><i /> <span>After</span><strong>{nextScheduled ? `${nextScheduled.task.estimateMinutes} min` : "Clear"}</strong></div>
           </div>
         </article>
       </section>
@@ -217,7 +236,7 @@ export function TodayView() {
           </div>
           <div className="week-note">
             <Sparkles size={16} />
-            <p><strong>Monday looks crowded.</strong> Two flexible tasks can move to Tuesday.</p>
+            <p><strong>{busiest.minutes ? `${busiest.day} carries the most.` : "No crowded day yet."}</strong> {busiest.minutes ? `${busiest.minutes} minutes planned.` : "Add dates from Tasks to shape your week."}</p>
           </div>
         </aside>
       </section>

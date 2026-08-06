@@ -10,9 +10,12 @@ import {
 } from "react";
 import {
   applyAssistantActions,
+  createTaskFromDraft,
+  formatTaskDue,
   seedTasks,
   type AssistantAction,
   type Task,
+  type TaskDraft,
 } from "@/lib/rhythm";
 
 const STORAGE_KEY = "rhythm.tasks.v1";
@@ -21,6 +24,9 @@ type RhythmContextValue = {
   tasks: Task[];
   hydrated: boolean;
   toggleTask: (id: string) => void;
+  createTask: (draft: TaskDraft) => void;
+  updateTask: (id: string, draft: TaskDraft) => void;
+  deleteTask: (id: string) => void;
   applyActions: (actions: AssistantAction[]) => void;
   undo: () => void;
   canUndo: boolean;
@@ -93,6 +99,44 @@ export function RhythmProvider({ children }: { children: React.ReactNode }) {
     [commit],
   );
 
+  const createTask = useCallback(
+    (draft: TaskDraft) => {
+      commit((current) => [createTaskFromDraft(draft), ...current]);
+    },
+    [commit],
+  );
+
+  const updateTask = useCallback(
+    (id: string, draft: TaskDraft) => {
+      commit((current) =>
+        current.map((task) =>
+          task.id === id
+            ? {
+                ...task,
+                title: draft.title.trim(),
+                project: draft.project.trim() || "Personal",
+                dueLabel: formatTaskDue(draft.dueDate, draft.dueTime),
+                dueDate: draft.dueDate,
+                dueTime: draft.dueTime,
+                estimateMinutes: Math.min(Math.max(draft.estimateMinutes, 5), 480),
+                priority: draft.priority,
+                later: draft.later,
+                note: draft.note?.trim() || undefined,
+              }
+            : task,
+        ),
+      );
+    },
+    [commit],
+  );
+
+  const deleteTask = useCallback(
+    (id: string) => {
+      commit((current) => current.filter((task) => task.id !== id));
+    },
+    [commit],
+  );
+
   const applyActions = useCallback(
     (actions: AssistantAction[]) => {
       if (!actions.length) return;
@@ -119,12 +163,15 @@ export function RhythmProvider({ children }: { children: React.ReactNode }) {
       tasks,
       hydrated,
       toggleTask,
+      createTask,
+      updateTask,
+      deleteTask,
       applyActions,
       undo,
       canUndo: history.length > 0,
       reset,
     }),
-    [tasks, hydrated, toggleTask, applyActions, undo, history.length, reset],
+    [tasks, hydrated, toggleTask, createTask, updateTask, deleteTask, applyActions, undo, history.length, reset],
   );
 
   return <RhythmContext.Provider value={value}>{children}</RhythmContext.Provider>;

@@ -15,6 +15,8 @@ const TaskSchema = z.object({
   dueLabel: shortText(120), estimateMinutes: z.number().int().min(1).max(480),
   status: z.enum(["pending", "completed"]), priority: z.enum(["low", "medium", "high"]),
   source: z.enum(["task", "calendar", "slack", "rhythm"]), later: z.boolean(),
+  dueDate: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  dueTime: z.string().trim().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
   note: z.string().trim().max(320).optional(),
 }).strict();
 const RequestSchema = z.object({
@@ -58,9 +60,87 @@ function validateChatPayload(payload: unknown): ChatRequest | null {
 }
 
 function describeTasks(tasks: Task[]) {
-  return JSON.stringify(tasks.map(({ id, title, project, dueLabel, estimateMinutes, status, later }) => ({
-    id, title, project, dueLabel, estimateMinutes, status, later,
+  return JSON.stringify(tasks.map(({ id, title, project, dueLabel, dueDate, dueTime, estimateMinutes, status, later }) => ({
+    id, title, project, dueLabel, dueDate, dueTime, estimateMinutes, status, later,
   })));
+}
+
+function localSuggestions(tasks: Task[]) {
+  const pending = tasks.filter((task) => task.status === "pending");
+  return [
+    pending[0] ? `Complete ${pending[0].title}` : "Create a task for tomorrow",
+    "What can wait until tomorrow?",
+    "Give me a short plan for today",
+  ];
+}
+
+function taskMatch(message: string, tasks: Task[]) {
+  const normalizeWord = (word: string) => word.startsWith("prep") ? "prep" : word;
+  const inputWords = new Set((message.toLowerCase().match(/[a-z0-9]+/g) ?? []).map(normalizeWord));
+  return tasks
+    .filter((task) => task.status === "pending")
+    .map((task) => {
+      const words = (task.title.toLowerCase().match(/[a-z0-9]+/g) ?? []).map(normalizeWord);
+      const score = words.filter((word) => word.length > 2 && inputWords.has(word)).length;
+      return { task, score };
+    })
+    .sort((a, b) => b.score - a.score)
+    .find((item) => item.score >= 2)?.task;
+}
+
+function dueFromMessage(message: string) {
+  const match = message.match(/\b(?:to|for)\s+((?:today|tonight|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday)(?:\s+(?:morning|afternoon|evening|night))?)/i);
+  if (!match) return null;
+  return match[1].replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function localReply(payload: ChatRequest) {
+  const message = payload.messages.at(-1)?.content.trim() ?? "";
+  const lower = message.toLowerCase();
+  const suggestions = localSuggestions(payload.tasks);
+
+  if (/\b(create|add|make)\b/.test(lower) && /\btask\b/.test(lower)) {
+    const estimate = Number(message.match(/(\d{1,3})\s*(?:-|\s)?minutes?/i)?.[1] ?? 25);
+    const rawTitle = message.match(/\btask\s+(?:to\s+)?(.+?)(?:\s+(?:today|tonight|tomorrow|on\s+\w+|for\s+\w+))?[.!?]?$/i)?.[1]
+      ?.replace(/^for\s+/, "")
+      .replace(/\b\d{1,3}\s*(?:-|\s)?minutes?\b/gi, "")
+      .trim();
+    const title = rawTitle || "New task";
+    const dueLabel = dueFromMessage(message) || (/tonight/i.test(message) ? "Tonight" : "Today");
+    return {
+      message: `Added “${title}” for ${dueLabel.toLowerCase()}.`,
+      suggestions,
+      actions: [{ type: "create_task", taskId: null, title, project: "Personal", dueLabel, estimateMinutes: Math.min(Math.max(estimate, 5), 480) }] satisfies AssistantAction[],
+    };
+  }
+
+  if (/\b(complete|finish|done|mark)\b/.test(lower)) {
+    const task = taskMatch(message, payload.tasks);
+    if (task) return {
+      message: `Marked “${task.title}” complete.`, suggestions,
+      actions: [{ type: "complete_task", taskId: task.id, title: null, project: null, dueLabel: null, estimateMinutes: null }] satisfies AssistantAction[],
+    };
+    return { message: "I could not tell which task you meant. Use two or more words from its title.", suggestions, actions: [] as AssistantAction[] };
+  }
+
+  if (/\b(move|reschedule|postpone)\b/.test(lower)) {
+    const task = taskMatch(message, payload.tasks);
+    const dueLabel = dueFromMessage(message);
+    if (task && dueLabel) return {
+      message: `Moved “${task.title}” to ${dueLabel.toLowerCase()}.`, suggestions,
+      actions: [{ type: "reschedule_task", taskId: task.id, title: null, project: null, dueLabel, estimateMinutes: null }] satisfies AssistantAction[],
+    };
+    return { message: "Name the task and a day, such as “Move Monday meeting prep to tomorrow morning.”", suggestions, actions: [] as AssistantAction[] };
+  }
+
+  const pending = payload.tasks.filter((task) => task.status === "pending" && !task.later).sort((a, b) => ({ high: 0, medium: 1, low: 2 })[a.priority] - ({ high: 0, medium: 1, low: 2 })[b.priority]);
+  if (!pending.length) return { message: "Nothing urgent remains. You can stop for today.", suggestions, actions: [] as AssistantAction[] };
+  const focus = pending.slice(0, 3);
+  return {
+    message: `Start with “${focus[0].title}” (${focus[0].estimateMinutes} min).${focus.length > 1 ? ` Then ${focus.slice(1).map((task) => `“${task.title}”`).join(" and ")}.` : ""} Everything else can wait.`,
+    suggestions,
+    actions: [] as AssistantAction[],
+  };
 }
 
 function sanitizeActions(actions: ProviderAction[], tasks: Task[]): AssistantAction[] {
@@ -117,8 +197,6 @@ Always include up to three short, useful follow-up suggestions.`;
 }
 
 export async function POST(request: Request) {
-  const apiKey = process.env.GEMINI_API_KEY?.trim();
-  if (!apiKey) return Response.json({ error: "AI chat needs a GEMINI_API_KEY in your Vercel environment." }, { status: 503 });
   if (isContentLengthTooLarge(request)) return Response.json({ error: "That request was too large or incomplete." }, { status: 400 });
 
   let body: unknown;
@@ -133,6 +211,8 @@ export async function POST(request: Request) {
   }
   const payload = validateChatPayload(body);
   if (!payload) return Response.json({ error: "That request was too large or incomplete." }, { status: 400 });
+  const apiKey = process.env.GEMINI_API_KEY?.trim();
+  if (!apiKey) return Response.json(localReply(payload));
 
   try {
     const client = new GoogleGenAI({ apiKey });

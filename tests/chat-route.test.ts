@@ -43,16 +43,16 @@ function request(body: unknown, headers?: HeadersInit) {
   });
 }
 
-test("returns calm setup error without a Gemini key", async () => {
+test("uses the local assistant without a Gemini key", async () => {
   const prior = process.env.GEMINI_API_KEY;
   delete process.env.GEMINI_API_KEY;
   const response = await POST(request(payload));
-  process.env.GEMINI_API_KEY = prior;
+  if (prior) process.env.GEMINI_API_KEY = prior;
 
-  assert.equal(response.status, 503);
-  assert.deepEqual(await response.json(), {
-    error: "AI chat needs a GEMINI_API_KEY in your Vercel environment.",
-  });
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json()).actions, [
+    { type: "reschedule_task", taskId: "monday-meeting", title: null, project: null, dueLabel: "Friday", estimateMinutes: null },
+  ]);
 });
 
 test("rejects malformed and oversized route payloads before provider call", async () => {

@@ -170,7 +170,7 @@ export function ChatView() {
             {messages.length === 0 ? (
               <div className="chat-empty">
                 <span className="assistant-mark"><WandSparkles size={22} /></span>
-                <p>Hello Alex</p>
+                <p>Hello Jazz</p>
                 <h2>What can I <strong>help you</strong> with?</h2>
                 <div className="prompt-grid">
                   {prompts.slice(0, 2).map((prompt) => (
@@ -255,7 +255,7 @@ export function ChatView() {
           </div>
           <div className="context-window">
             <Clock3 size={17} />
-            <div><span>Free before NEXT sync</span><strong>52 minutes</strong></div>
+            <div><span>Open task time</span><strong>{pendingTasks.reduce((sum, task) => sum + task.estimateMinutes, 0)} minutes</strong></div>
           </div>
           <div className="context-note">
             <CornerDownRight size={16} />
