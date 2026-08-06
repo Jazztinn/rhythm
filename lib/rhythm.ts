@@ -1,6 +1,13 @@
 export type TaskStatus = "pending" | "completed";
 export type TaskPriority = "low" | "medium" | "high";
 export type TaskSource = "task" | "calendar" | "slack" | "rhythm";
+export type RhythmFrequency = "daily" | "weekly";
+export type RhythmWeekday = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+
+export type RhythmSchedule = {
+  frequency: RhythmFrequency;
+  weekdays?: RhythmWeekday[];
+};
 
 export type Task = {
   id: string;
@@ -25,9 +32,31 @@ export type RhythmDefinition = {
   id: string;
   title: string;
   note: string;
-  time: string;
+  schedule: RhythmSchedule;
+  localTime?: string;
   icon: "sun" | "waves" | "moon" | "orbit";
   tone: "lime" | "violet" | "peach";
+  project?: string;
+  estimateMinutes?: number;
+  priority?: TaskPriority;
+  paused?: boolean;
+  archived?: boolean;
+  /** @deprecated Read only compatibility for pre-phase-2 V3 data. */
+  time?: string;
+};
+
+export type RhythmException = {
+  rhythmId: string;
+  occurrenceDate: string;
+  kind: "skip" | "reschedule";
+  replacementDate?: string;
+  replacementTime?: string;
+};
+
+export type RhythmCompletion = {
+  rhythmId: string;
+  occurrenceDate: string;
+  completedAt?: string;
 };
 
 export type WorkspaceSettings = {
@@ -42,6 +71,8 @@ export type WorkspaceSnapshot = {
   rhythms: RhythmDefinition[];
   exceptions: Record<string, string[]>;
   completions: Record<string, string[]>;
+  rhythmExceptions: RhythmException[];
+  rhythmCompletions: RhythmCompletion[];
   settings: WorkspaceSettings;
 };
 
@@ -51,6 +82,8 @@ export type WorkspaceStateV3 = {
   rhythms: RhythmDefinition[];
   exceptions: Record<string, string[]>;
   completions: Record<string, string[]>;
+  rhythmExceptions: RhythmException[];
+  rhythmCompletions: RhythmCompletion[];
   settings: WorkspaceSettings;
   history: WorkspaceSnapshot[];
 };
@@ -156,6 +189,105 @@ export function addDays(date: Date, amount: number) {
   const next = new Date(date);
   next.setDate(next.getDate() + amount);
   return next;
+}
+
+function dateFromKey(dateKey: string) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  return new Date(year, month - 1, day, 12, 0, 0, 0);
+}
+
+function nextDateKey(dateKey: string) {
+  return toDateKey(addDays(dateFromKey(dateKey), 1));
+}
+
+function isDateKey(value: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(dateFromKey(value).getTime());
+}
+
+export function dateRangeFrom(now = new Date(), daysBefore = 365, daysAfter = 365) {
+  return { start: toDateKey(addDays(now, -daysBefore)), end: toDateKey(addDays(now, daysAfter)) };
+}
+
+export function rhythmOccurrenceId(rhythmId: string, occurrenceDate: string) {
+  return `rhythm:${rhythmId}:${occurrenceDate}`;
+}
+
+function exceptionList(value: RhythmException[] | Record<string, string[]>) {
+  return Array.isArray(value) ? value : recordsToExceptions(value);
+}
+
+function completionList(value: RhythmCompletion[] | Record<string, string[]>) {
+  return Array.isArray(value) ? value : recordsToCompletions(value);
+}
+
+function followsSchedule(definition: RhythmDefinition, dateKey: string) {
+  if (definition.schedule.frequency === "daily") return true;
+  return (definition.schedule.weekdays ?? [1]).includes(dateFromKey(dateKey).getDay() as RhythmWeekday);
+}
+
+export function generateOccurrences(
+  definitions: RhythmDefinition[],
+  exceptions: RhythmException[] | Record<string, string[]>,
+  completions: RhythmCompletion[] | Record<string, string[]>,
+  start: string,
+  end: string,
+): Task[] {
+  if (!isDateKey(start) || !isDateKey(end) || start > end) return [];
+  const exceptionByKey = new Map(exceptionList(exceptions).map((exception) => [`${exception.rhythmId}:${exception.occurrenceDate}`, exception]));
+  const completedKeys = new Set(completionList(completions).map((completion) => `${completion.rhythmId}:${completion.occurrenceDate}`));
+  const result: Task[] = [];
+
+  for (const rawDefinition of definitions) {
+    const definition = normalizeRhythmDefinition(rawDefinition);
+    if (definition.paused || definition.archived) continue;
+    const occurrenceDates = new Set<string>();
+    for (let occurrenceDate = start; occurrenceDate <= end; occurrenceDate = nextDateKey(occurrenceDate)) occurrenceDates.add(occurrenceDate);
+    const rescheduledTargets = new Set(exceptionList(exceptions).filter((exception) => exception.rhythmId === definition.id && exception.kind === "reschedule" && exception.replacementDate).map((exception) => exception.replacementDate!));
+    for (const exception of exceptionList(exceptions)) {
+      if (exception.rhythmId === definition.id && exception.kind === "reschedule" && exception.replacementDate && exception.replacementDate >= start && exception.replacementDate <= end) occurrenceDates.add(exception.occurrenceDate);
+    }
+    for (const occurrenceDate of [...occurrenceDates].sort()) {
+      if (!isDateKey(occurrenceDate)) continue;
+      if (!followsSchedule(definition, occurrenceDate)) continue;
+      const exception = exceptionByKey.get(`${definition.id}:${occurrenceDate}`);
+      if (exception?.kind === "skip") continue;
+      if (!exception && rescheduledTargets.has(occurrenceDate)) continue;
+      const dueDate = exception?.kind === "reschedule" && exception.replacementDate
+        ? exception.replacementDate
+        : occurrenceDate;
+      if (dueDate < start || dueDate > end) continue;
+      const dueTime = exception?.kind === "reschedule" && exception.replacementTime !== undefined
+        ? exception.replacementTime
+        : definition.localTime;
+      result.push({
+        id: rhythmOccurrenceId(definition.id, occurrenceDate),
+        title: definition.title,
+        project: definition.project?.trim() || "Personal",
+        dueLabel: formatTaskDue(dueDate, dueTime ?? ""),
+        estimateMinutes: clampEstimateMinutes(definition.estimateMinutes ?? 25),
+        status: completedKeys.has(`${definition.id}:${occurrenceDate}`) ? "completed" : "pending",
+        priority: definition.priority ?? "medium",
+        source: "rhythm",
+        later: false,
+        dueDate,
+        dueTime,
+        note: definition.note,
+        rhythmId: definition.id,
+        occurrenceDate,
+        generated: true,
+      });
+    }
+  }
+  return result;
+}
+
+export function getNextRhythmOccurrence(definition: RhythmDefinition, start = toDateKey(new Date())) {
+  const normalized = normalizeRhythmDefinition(definition);
+  if (normalized.paused || normalized.archived || !isDateKey(start)) return null;
+  for (let date = start, count = 0; count < 370; date = nextDateKey(date), count += 1) {
+    if (followsSchedule(normalized, date)) return date;
+  }
+  return null;
 }
 
 export function formatTaskDue(dateKey: string, time: string, now = new Date()) {
@@ -299,9 +431,9 @@ export const seedTasks: Task[] = [
 ];
 
 export const seedRhythms: RhythmDefinition[] = [
-  { id: "morning", title: "Start softly", note: "Water, sunlight, no inbox", time: "08:00", icon: "sun", tone: "lime" },
-  { id: "focus", title: "Protect one deep block", note: "One important thing, fully present", time: "10:00", icon: "waves", tone: "violet" },
-  { id: "shutdown", title: "Close the loops", note: "Review, reset, step away", time: "20:30", icon: "moon", tone: "peach" },
+  { id: "morning", title: "Start softly", note: "Water, sunlight, no inbox", schedule: { frequency: "daily" }, localTime: "08:00", icon: "sun", tone: "lime", project: "Personal", estimateMinutes: 15, priority: "low" },
+  { id: "focus", title: "Protect one deep block", note: "One important thing, fully present", schedule: { frequency: "daily" }, localTime: "10:00", icon: "waves", tone: "violet", project: "Personal", estimateMinutes: 45, priority: "medium" },
+  { id: "shutdown", title: "Close the loops", note: "Review, reset, step away", schedule: { frequency: "daily" }, localTime: "20:30", icon: "moon", tone: "peach", project: "Personal", estimateMinutes: 20, priority: "low" },
 ];
 
 export const WORKSPACE_STORAGE_KEY = "rhythm.workspace.v3";
@@ -313,11 +445,50 @@ function cloneTasks(tasks: Task[]) {
 }
 
 function cloneRhythms(rhythms: RhythmDefinition[]) {
-  return rhythms.map((rhythm) => ({ ...rhythm }));
+  return rhythms.map(normalizeRhythmDefinition);
 }
 
 function cloneRecord(record: Record<string, string[]>) {
   return Object.fromEntries(Object.entries(record).map(([key, value]) => [key, [...value]]));
+}
+
+function cloneExceptions(exceptions: RhythmException[]) {
+  return exceptions.map((exception) => ({ ...exception }));
+}
+
+function cloneCompletions(completions: RhythmCompletion[]) {
+  return completions.map((completion) => ({ ...completion }));
+}
+
+function normalizeWeekdays(value: unknown, fallback: RhythmWeekday[] = [1]) {
+  if (!Array.isArray(value)) return [...fallback];
+  const weekdays = [...new Set(value.filter((day): day is RhythmWeekday => Number.isInteger(day) && day >= 0 && day <= 6))];
+  return weekdays.length ? weekdays.sort((a, b) => a - b) : [...fallback];
+}
+
+export function normalizeRhythmDefinition(value: RhythmDefinition | Record<string, unknown>): RhythmDefinition {
+  const raw = value as Record<string, unknown>;
+  const legacyTime = typeof raw.time === "string" ? raw.time : undefined;
+  const rawSchedule = isRecord(raw.schedule) ? raw.schedule : undefined;
+  const frequency = rawSchedule?.frequency === "weekly" ? "weekly" : "daily";
+  const localTime = typeof raw.localTime === "string" ? raw.localTime : legacyTime;
+  return {
+    id: typeof raw.id === "string" ? raw.id : `rhythm-${Date.now()}`,
+    title: typeof raw.title === "string" ? raw.title : "Untitled rhythm",
+    note: typeof raw.note === "string" ? raw.note : "A small promise worth keeping",
+    schedule: {
+      frequency,
+      ...(frequency === "weekly" ? { weekdays: normalizeWeekdays(rawSchedule?.weekdays) } : {}),
+    },
+    ...(localTime ? { localTime } : {}),
+    icon: ["sun", "waves", "moon", "orbit"].includes(raw.icon as string) ? raw.icon as RhythmDefinition["icon"] : "orbit",
+    tone: ["lime", "violet", "peach"].includes(raw.tone as string) ? raw.tone as RhythmDefinition["tone"] : "lime",
+    ...(typeof raw.project === "string" ? { project: raw.project } : {}),
+    ...(typeof raw.estimateMinutes === "number" ? { estimateMinutes: clampEstimateMinutes(raw.estimateMinutes) } : {}),
+    ...(raw.priority === "low" || raw.priority === "medium" || raw.priority === "high" ? { priority: raw.priority } : {}),
+    ...(typeof raw.paused === "boolean" ? { paused: raw.paused } : {}),
+    ...(typeof raw.archived === "boolean" ? { archived: raw.archived } : {}),
+  };
 }
 
 function defaultWorkspaceSettings(): WorkspaceSettings {
@@ -334,6 +505,8 @@ export function createWorkspaceState(
     rhythms: cloneRhythms(rhythms),
     exceptions: {},
     completions: {},
+    rhythmExceptions: [],
+    rhythmCompletions: [],
     settings: defaultWorkspaceSettings(),
     history: [],
   };
@@ -353,10 +526,24 @@ export function isTask(value: unknown): value is Task {
 
 export function isRhythmDefinition(value: unknown): value is RhythmDefinition {
   if (!isRecord(value)) return false;
+  const hasSchedule = isRecord(value.schedule) && (value.schedule.frequency === "daily" || value.schedule.frequency === "weekly");
+  const hasLegacyTime = typeof value.time === "string";
   return typeof value.id === "string" && typeof value.title === "string" &&
-    typeof value.note === "string" && typeof value.time === "string" &&
+    typeof value.note === "string" && (hasSchedule || hasLegacyTime) &&
     ["sun", "waves", "moon", "orbit"].includes(value.icon as string) &&
     ["lime", "violet", "peach"].includes(value.tone as string);
+}
+
+function isRhythmException(value: unknown): value is RhythmException {
+  return isRecord(value) && typeof value.rhythmId === "string" && typeof value.occurrenceDate === "string" &&
+    (value.kind === "skip" || value.kind === "reschedule") &&
+    (value.replacementDate === undefined || typeof value.replacementDate === "string") &&
+    (value.replacementTime === undefined || typeof value.replacementTime === "string");
+}
+
+function isRhythmCompletion(value: unknown): value is RhythmCompletion {
+  return isRecord(value) && typeof value.rhythmId === "string" && typeof value.occurrenceDate === "string" &&
+    (value.completedAt === undefined || typeof value.completedAt === "string");
 }
 
 function isStringRecord(value: unknown): value is Record<string, string[]> {
@@ -368,6 +555,8 @@ function isWorkspaceSnapshot(value: unknown): value is WorkspaceSnapshot {
     Array.isArray(value.tasks) && value.tasks.every(isTask) &&
     Array.isArray(value.rhythms) && value.rhythms.every(isRhythmDefinition) &&
     isStringRecord(value.exceptions) && isStringRecord(value.completions) &&
+    (value.rhythmExceptions === undefined || (Array.isArray(value.rhythmExceptions) && value.rhythmExceptions.every(isRhythmException))) &&
+    (value.rhythmCompletions === undefined || (Array.isArray(value.rhythmCompletions) && value.rhythmCompletions.every(isRhythmCompletion))) &&
     isRecord(value.settings) && typeof value.settings.starterDataAvailable === "boolean" &&
     typeof value.settings.displayName === "string";
 }
@@ -376,9 +565,52 @@ export function isWorkspaceStateV3(value: unknown): value is WorkspaceStateV3 {
   return isRecord(value) && value.version === 3 && Array.isArray(value.tasks) && value.tasks.every(isTask) &&
     Array.isArray(value.rhythms) && value.rhythms.every(isRhythmDefinition) &&
     isStringRecord(value.exceptions) && isStringRecord(value.completions) &&
+    (value.rhythmExceptions === undefined || (Array.isArray(value.rhythmExceptions) && value.rhythmExceptions.every(isRhythmException))) &&
+    (value.rhythmCompletions === undefined || (Array.isArray(value.rhythmCompletions) && value.rhythmCompletions.every(isRhythmCompletion))) &&
     isRecord(value.settings) && typeof value.settings.starterDataAvailable === "boolean" &&
     typeof value.settings.displayName === "string" && Array.isArray(value.history) &&
     value.history.length <= 10 && value.history.every(isWorkspaceSnapshot);
+}
+
+function recordsToExceptions(record: Record<string, string[]>): RhythmException[] {
+  return Object.entries(record).flatMap(([rhythmId, dates]) => dates.map((occurrenceDate) => ({ rhythmId, occurrenceDate, kind: "skip" as const })));
+}
+
+function recordsToCompletions(record: Record<string, string[]>) {
+  return Object.entries(record).flatMap(([occurrenceDate, rhythmIds]) => rhythmIds.map((rhythmId) => ({ rhythmId, occurrenceDate })));
+}
+
+function completionsToRecord(completions: RhythmCompletion[]) {
+  return completions.reduce<Record<string, string[]>>((record, completion) => {
+    record[completion.occurrenceDate] ??= [];
+    if (!record[completion.occurrenceDate].includes(completion.rhythmId)) record[completion.occurrenceDate].push(completion.rhythmId);
+    return record;
+  }, {});
+}
+
+function normalizeWorkspaceState(value: WorkspaceStateV3): WorkspaceStateV3 {
+  const rhythmExceptions = Array.isArray((value as Partial<WorkspaceStateV3>).rhythmExceptions)
+    ? cloneExceptions(value.rhythmExceptions)
+    : recordsToExceptions(value.exceptions);
+  const rhythmCompletions = Array.isArray((value as Partial<WorkspaceStateV3>).rhythmCompletions)
+    ? cloneCompletions(value.rhythmCompletions)
+    : recordsToCompletions(value.completions);
+  return {
+    ...value,
+    rhythms: cloneRhythms(value.rhythms),
+    exceptions: cloneRecord(value.exceptions),
+    completions: { ...cloneRecord(value.completions), ...completionsToRecord(rhythmCompletions) },
+    rhythmExceptions,
+    rhythmCompletions,
+    history: value.history.map((snapshot) => ({
+      ...snapshot,
+      rhythms: cloneRhythms(snapshot.rhythms),
+      exceptions: cloneRecord(snapshot.exceptions),
+      completions: cloneRecord(snapshot.completions),
+      rhythmExceptions: Array.isArray(snapshot.rhythmExceptions) ? cloneExceptions(snapshot.rhythmExceptions) : recordsToExceptions(snapshot.exceptions),
+      rhythmCompletions: Array.isArray(snapshot.rhythmCompletions) ? cloneCompletions(snapshot.rhythmCompletions) : recordsToCompletions(snapshot.completions),
+    })),
+  };
 }
 
 export function migrateWorkspaceData(
@@ -388,7 +620,7 @@ export function migrateWorkspaceData(
 ): { state: WorkspaceStateV3; status: WorkspaceMigrationStatus; recoverable: boolean } {
   if (v3Value !== null && v3Value !== undefined) {
     if (isWorkspaceStateV3(v3Value)) {
-      return { state: v3Value, status: "v3", recoverable: false };
+      return { state: normalizeWorkspaceState(v3Value), status: "v3", recoverable: false };
     }
     return { state: createWorkspaceState(), status: "corrupt", recoverable: true };
   }
@@ -410,6 +642,7 @@ export function migrateWorkspaceData(
   );
   if (isRecord(legacyRhythmsValue) && legacyRhythmsValue.date === toDateKey(new Date()) && Array.isArray(legacyRhythmsValue.done)) {
     state.completions[toDateKey(new Date())] = legacyRhythmsValue.done.filter((id): id is string => typeof id === "string");
+    state.rhythmCompletions = recordsToCompletions(state.completions);
   }
 
   const status: WorkspaceMigrationStatus = hasLegacyTasks && hasLegacyRhythms
@@ -430,6 +663,8 @@ function snapshotFor(state: WorkspaceStateV3, label: string, createdAt = new Dat
     rhythms: cloneRhythms(state.rhythms),
     exceptions: cloneRecord(state.exceptions),
     completions: cloneRecord(state.completions),
+    rhythmExceptions: cloneExceptions(state.rhythmExceptions),
+    rhythmCompletions: cloneCompletions(state.rhythmCompletions),
     settings: { ...state.settings },
   };
 }
@@ -458,6 +693,8 @@ export function undoWorkspace(state: WorkspaceStateV3): WorkspaceStateV3 {
     rhythms: cloneRhythms(snapshot.rhythms),
     exceptions: cloneRecord(snapshot.exceptions),
     completions: cloneRecord(snapshot.completions),
+    rhythmExceptions: cloneExceptions(snapshot.rhythmExceptions ?? recordsToExceptions(snapshot.exceptions)),
+    rhythmCompletions: cloneCompletions(snapshot.rhythmCompletions ?? recordsToCompletions(snapshot.completions)),
     settings: { ...snapshot.settings },
     history: state.history.slice(0, -1),
   };

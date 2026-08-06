@@ -5,7 +5,8 @@ import Link from "next/link";
 import { gsap } from "gsap";
 import { ArrowLeft, ArrowRight, CalendarDays, Clock3, Sparkles } from "lucide-react";
 import { useRhythm } from "@/components/rhythm-provider";
-import { addDays, resolveTaskDate, toDateKey, type Task } from "@/lib/rhythm";
+import { OccurrenceActionSheet } from "@/components/occurrence-action-sheet";
+import { addDays, dateRangeFrom, resolveTaskDate, toDateKey, type Task } from "@/lib/rhythm";
 
 const hours = [8, 10, 12, 14, 16, 18, 20, 22];
 const tones = { high: "peach", medium: "green", low: "violet" } as const;
@@ -37,28 +38,30 @@ function taskDate(task: Task, now: Date) {
 export function CalendarView() {
   const root = useRef<HTMLDivElement>(null);
   const calendarPanel = useRef<HTMLElement>(null);
-  const { tasks } = useRhythm();
+  const { getWorkItems, completeOccurrence, uncompleteOccurrence, skipOccurrence, rescheduleOccurrence } = useRhythm();
   const [weekOffset, setWeekOffset] = useState(0);
   const [now, setNow] = useState(() => new Date(1704110400000));
+  const [occurrenceTask, setOccurrenceTask] = useState<Task | null>(null);
   useEffect(() => {
     const timer = window.setTimeout(() => setNow(new Date()), 0);
     return () => window.clearTimeout(timer);
   }, []);
   const weekStart = useMemo(() => addDays(startOfWeek(now), weekOffset * 7), [now, weekOffset]);
   const days = useMemo(() => Array.from({ length: 7 }, (_, index) => addDays(weekStart, index)), [weekStart]);
+  const workItems = useMemo(() => getWorkItems(dateRangeFrom(now, 365, 365)), [getWorkItems, now]);
 
   const weekTasks = useMemo(() => {
     const dayKeys = new Set(days.map(toDateKey));
-    return tasks.filter((task) => {
+    return workItems.filter((task) => {
       const key = resolveTaskDate(task, now);
-      return task.status === "pending" && key !== null && dayKeys.has(key);
+      return key !== null && dayKeys.has(key);
     });
-  }, [days, now, tasks]);
+  }, [days, now, workItems]);
   const scheduled = weekTasks.filter((task) => task.dueTime);
-  const unscheduled = tasks.filter((task) => task.status === "pending" && (!resolveTaskDate(task, now) || !task.dueTime));
-  const plannedMinutes = weekTasks.reduce((sum, task) => sum + task.estimateMinutes, 0);
+  const unscheduled = workItems.filter((task) => task.status === "pending" && (!resolveTaskDate(task, now) || !task.dueTime));
+  const plannedMinutes = weekTasks.filter((task) => task.status === "pending").reduce((sum, task) => sum + task.estimateMinutes, 0);
   const roomMinutes = Math.max(0, 40 * 60 - plannedMinutes);
-  const upcoming = tasks
+  const upcoming = workItems
     .filter((task) => task.status === "pending")
     .map((task) => ({ task, date: taskDate(task, now) }))
     .filter((item): item is { task: Task; date: Date } => item.date !== null && item.date.getTime() >= now.getTime())
@@ -104,11 +107,12 @@ export function CalendarView() {
             const hour = Number(task.dueTime?.slice(0, 2) || 12);
             let closestRow = 0;
             for (let index = 1; index < hours.length; index += 1) if (Math.abs(hours[index] - hour) < Math.abs(hours[closestRow] - hour)) closestRow = index;
-            return <article key={task.id} className={`calendar-event tone-${tones[task.priority]}`} style={{ gridColumn: day + 2, gridRow: closestRow + 2 }}><small>{task.dueTime ? new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(dateFromKey(key!, task.dueTime)) : "Flexible"}</small><strong>{task.title}</strong></article>;
+            return <article key={task.id} className={`calendar-event tone-${tones[task.priority]} ${task.status === "completed" ? "is-done" : ""}`} style={{ gridColumn: day + 2, gridRow: closestRow + 2 }} onClick={() => task.generated ? setOccurrenceTask(task) : undefined} onKeyDown={(event) => { if (task.generated && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); setOccurrenceTask(task); } }} role={task.generated ? "button" : undefined} tabIndex={task.generated ? 0 : undefined}><small>{task.generated ? "From Rhythm · " : ""}{task.dueTime ? new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(dateFromKey(key!, task.dueTime)) : "Flexible"}</small><strong>{task.title}</strong></article>;
           })}
         </div>
       </section>
-      <aside className="calendar-task-strip" data-workspace-reveal><span>{unscheduled.length} need a time</span>{unscheduled.slice(0, 4).map((task) => <Link href="/tasks" key={task.id}><article><i /><div><strong>{task.title}</strong><small>{task.estimateMinutes} min · {task.project}</small></div></article></Link>)}</aside>
+      <aside className="calendar-task-strip" data-workspace-reveal><span>{unscheduled.length} need a time</span>{unscheduled.slice(0, 4).map((task) => <Link href="/tasks" key={task.id}><article><i /><div><strong>{task.title}</strong><small>{task.generated ? "From Rhythm · " : ""}{task.estimateMinutes} min · {task.project}</small></div></article></Link>)}</aside>
+      {occurrenceTask?.rhythmId && occurrenceTask.occurrenceDate ? <OccurrenceActionSheet task={occurrenceTask} onClose={() => setOccurrenceTask(null)} onComplete={() => { completeOccurrence({ rhythmId: occurrenceTask.rhythmId!, occurrenceDate: occurrenceTask.occurrenceDate! }); setOccurrenceTask(null); }} onUncomplete={() => { uncompleteOccurrence({ rhythmId: occurrenceTask.rhythmId!, occurrenceDate: occurrenceTask.occurrenceDate! }); setOccurrenceTask(null); }} onSkip={() => { skipOccurrence({ rhythmId: occurrenceTask.rhythmId!, occurrenceDate: occurrenceTask.occurrenceDate! }); setOccurrenceTask(null); }} onReschedule={(date, time) => { rescheduleOccurrence({ rhythmId: occurrenceTask.rhythmId!, occurrenceDate: occurrenceTask.occurrenceDate! }, date, time); setOccurrenceTask(null); }} /> : null}
     </div>
   );
 }
