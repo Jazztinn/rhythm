@@ -5,9 +5,10 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { CalendarDays, CheckSquare2, MessageCircleMore, Orbit, Search, Sparkles } from "lucide-react";
 import { TaskEditor } from "@/components/task-editor";
+import { OccurrenceActionSheet } from "@/components/occurrence-action-sheet";
 import { ConfirmAction, Dialog, StatusMessage, Toast } from "@/components/ui";
 import { useRhythm } from "@/components/rhythm-provider";
-import { searchTasks, type Task, type TaskDraft } from "@/lib/rhythm";
+import { dateRangeFrom, searchTasks, type Task, type TaskDraft } from "@/lib/rhythm";
 
 const navigation = [
   { label: "Today", href: "/", icon: CheckSquare2 },
@@ -18,10 +19,10 @@ const navigation = [
 ];
 
 function SearchDialog({ open, onClose, onOpenTask }: { open: boolean; onClose: () => void; onOpenTask: (task: Task) => void }) {
-  const { tasks, toggleTask } = useRhythm();
+  const { getWorkItems, completeOccurrence, uncompleteOccurrence } = useRhythm();
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
-  const results = useMemo(() => searchTasks(tasks, query), [query, tasks]);
+  const results = useMemo(() => searchTasks(getWorkItems(dateRangeFrom(new Date(), 365, 365)), query), [getWorkItems, query]);
   const safeActiveIndex = Math.min(activeIndex, Math.max(results.length - 1, 0));
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
@@ -58,7 +59,7 @@ function SearchDialog({ open, onClose, onOpenTask }: { open: boolean; onClose: (
     <div id="rhythm-search-results" className="search-results" role="listbox" aria-label="Task search results">
       <span className="section-kicker">{query ? "Matches" : "Recent tasks"}</span>
       {results.map((task, index) => <div key={task.id} id={`search-result-${task.id}`} className={`search-result ${index === safeActiveIndex ? "is-active" : ""}`} role="option" aria-selected={index === safeActiveIndex}>
-        <button className={`search-check ${task.status === "completed" ? "is-complete" : ""}`} onClick={() => toggleTask(task.id)} aria-label={`${task.status === "completed" ? "Reopen" : "Complete"} ${task.title}`} />
+        <button className={`search-check ${task.status === "completed" ? "is-complete" : ""}`} onClick={() => task.generated && task.rhythmId && task.occurrenceDate ? (task.status === "completed" ? uncompleteOccurrence({ rhythmId: task.rhythmId, occurrenceDate: task.occurrenceDate }) : completeOccurrence({ rhythmId: task.rhythmId, occurrenceDate: task.occurrenceDate })) : undefined} aria-label={`${task.status === "completed" ? "Reopen" : "Complete"} ${task.title}`} />
         <button className="search-result__open" onClick={() => onOpenTask(task)}>
           <strong>{task.title}</strong><span>{task.project} · {task.dueLabel}</span>
         </button>
@@ -73,10 +74,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const navigationRef = useRef<HTMLElement>(null);
   const searchTriggerRef = useRef<HTMLButtonElement>(null);
-  const { tasks, hydrated, storageNotice, undoToast, undoLast, dismissUndoToast, recoverStorage, updateTask, deleteTask } = useRhythm();
+  const { tasks, hydrated, storageNotice, undoToast, undoLast, dismissUndoToast, recoverStorage, updateTask, deleteTask, completeOccurrence, uncompleteOccurrence, skipOccurrence, rescheduleOccurrence } = useRhythm();
   const [searchOpen, setSearchOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [editorTask, setEditorTask] = useState<Task | null>(null);
+  const [occurrenceTask, setOccurrenceTask] = useState<Task | null>(null);
   const completed = tasks.filter((task) => task.status === "completed").length;
 
   useEffect(() => {
@@ -98,7 +100,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   function openTask(task: Task) {
     setSearchOpen(false);
-    setEditorTask(task);
+    if (task.generated) setOccurrenceTask(task);
+    else setEditorTask(task);
   }
 
   function saveTask(draft: TaskDraft) {
@@ -138,5 +141,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     {undoToast ? <Toast label={undoToast.label} onUndo={undoLast} onDismiss={dismissUndoToast} /> : null}
     <SearchDialog open={searchOpen} onClose={() => setSearchOpen(false)} onOpenTask={openTask} />
     {editorTask ? <TaskEditor key={editorTask.id} task={editorTask} onClose={() => setEditorTask(null)} onSave={saveTask} onDelete={() => { deleteTask(editorTask.id); setEditorTask(null); }} /> : null}
+    {occurrenceTask?.rhythmId && occurrenceTask.occurrenceDate ? <OccurrenceActionSheet task={occurrenceTask} onClose={() => setOccurrenceTask(null)} onComplete={() => { completeOccurrence({ rhythmId: occurrenceTask.rhythmId!, occurrenceDate: occurrenceTask.occurrenceDate! }); setOccurrenceTask(null); }} onUncomplete={() => { uncompleteOccurrence({ rhythmId: occurrenceTask.rhythmId!, occurrenceDate: occurrenceTask.occurrenceDate! }); setOccurrenceTask(null); }} onSkip={() => { skipOccurrence({ rhythmId: occurrenceTask.rhythmId!, occurrenceDate: occurrenceTask.occurrenceDate! }); setOccurrenceTask(null); }} onReschedule={(date, time) => { rescheduleOccurrence({ rhythmId: occurrenceTask.rhythmId!, occurrenceDate: occurrenceTask.occurrenceDate! }, date, time); setOccurrenceTask(null); }} /> : null}
   </div>;
 }

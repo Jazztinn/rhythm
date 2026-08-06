@@ -3,8 +3,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Check, Circle, Clock3, Pencil, Plus, Search } from "lucide-react";
 import { useRhythm } from "@/components/rhythm-provider";
+import { OccurrenceActionSheet } from "@/components/occurrence-action-sheet";
 import { EmptyState, Button, Spinner } from "@/components/ui";
-import { resolveTaskDate, toDateKey, type Task, type TaskDraft } from "@/lib/rhythm";
+import { dateRangeFrom, resolveTaskDate, toDateKey, type Task, type TaskDraft } from "@/lib/rhythm";
 import { TaskEditor } from "@/components/task-editor";
 
 type Filter = "all" | "today" | "overdue" | "upcoming" | "later";
@@ -27,26 +28,28 @@ function TaskRow({ task, onToggle, onEdit }: { task: Task; onToggle: () => void;
 }
 
 export function TasksView() {
-  const { tasks, hydrated, toggleTask, createTask, updateTask, deleteTask, canUndo, undoLast } = useRhythm();
+  const { getWorkItems, hydrated, toggleTask, completeOccurrence, uncompleteOccurrence, skipOccurrence, rescheduleOccurrence, createTask, updateTask, deleteTask, canUndo, undoLast } = useRhythm();
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
   const [project, setProject] = useState("all");
   const [editorTask, setEditorTask] = useState<Task | "new" | null>(null);
+  const [occurrenceTask, setOccurrenceTask] = useState<Task | null>(null);
   const today = toDateKey(new Date());
-  const projects = useMemo(() => [...new Set(tasks.map((task) => task.project).filter(Boolean))].sort(), [tasks]);
+  const workItems = useMemo(() => getWorkItems(dateRangeFrom(new Date(), 365, 365)), [getWorkItems]);
+  const projects = useMemo(() => [...new Set(workItems.map((task) => task.project).filter(Boolean))].sort(), [workItems]);
 
   useEffect(() => {
     if (!hydrated) return;
     const timer = window.setTimeout(() => {
       const requestedId = new URLSearchParams(window.location.search).get("task");
-      const requestedTask = requestedId ? tasks.find((task) => task.id === requestedId) : undefined;
-      if (requestedTask) setEditorTask(requestedTask);
+      const requestedTask = requestedId ? workItems.find((task) => task.id === requestedId) : undefined;
+      if (requestedTask) (requestedTask.generated ? setOccurrenceTask : setEditorTask)(requestedTask);
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [hydrated, tasks]);
+  }, [hydrated, workItems]);
 
-  const openTasks = useMemo(() => tasks.filter((task) => task.status === "pending"), [tasks]);
-  const completedTasks = useMemo(() => tasks.filter((task) => task.status === "completed"), [tasks]);
+  const openTasks = useMemo(() => workItems.filter((task) => task.status === "pending"), [workItems]);
+  const completedTasks = useMemo(() => workItems.filter((task) => task.status === "completed"), [workItems]);
   const visibleTasks = useMemo(() => {
     const clean = query.trim().toLocaleLowerCase();
     return openTasks.filter((task) => {
@@ -61,6 +64,13 @@ export function TasksView() {
     if (editorTask === "new") createTask(draft);
     else if (editorTask) updateTask(editorTask.id, draft);
     setEditorTask(null);
+  }
+
+  function toggleWorkItem(task: Task) {
+    if (task.generated && task.rhythmId && task.occurrenceDate) {
+      const occurrence = { rhythmId: task.rhythmId, occurrenceDate: task.occurrenceDate };
+      (task.status === "completed" ? uncompleteOccurrence : completeOccurrence)(occurrence);
+    } else toggleTask(task.id);
   }
 
   if (!hydrated) return <div className="workspace-view"><div className="loading-panel"><Spinner label="Loading tasks" /><p>Preparing Tasks from your local workspace…</p></div></div>;
@@ -86,15 +96,16 @@ export function TasksView() {
         {filterLabels.slice(1).map(([bucket, label]) => {
           const group = visibleTasks.filter((task) => taskBucket(task, today) === bucket);
           if (filter !== "all" && filter !== bucket) return null;
-          return <section className="task-group" key={bucket} aria-labelledby={`task-group-${bucket}`}><div className="task-group__heading"><h2 id={`task-group-${bucket}`}>{label}</h2><span>{group.length}</span></div>{group.length ? <ol className="full-task-list" aria-label={`${label} tasks`}>{group.map((task) => <TaskRow key={task.id} task={task} onToggle={() => toggleTask(task.id)} onEdit={() => setEditorTask(task)} />)}</ol> : <p className="task-group__empty">No {label.toLocaleLowerCase()} open tasks.</p>}</section>;
+          return <section className="task-group" key={bucket} aria-labelledby={`task-group-${bucket}`}><div className="task-group__heading"><h2 id={`task-group-${bucket}`}>{label}</h2><span>{group.length}</span></div>{group.length ? <ol className="full-task-list" aria-label={`${label} tasks`}>{group.map((task) => <TaskRow key={task.id} task={task} onToggle={() => toggleWorkItem(task)} onEdit={() => task.generated ? setOccurrenceTask(task) : setEditorTask(task)} />)}</ol> : <p className="task-group__empty">No {label.toLocaleLowerCase()} open tasks.</p>}</section>;
         })}
         {!visibleTasks.length && filteredByControls ? <EmptyState title="No tasks match these filters" description="Try another view, project, or search term." action={<Button type="button" onClick={() => { setFilter("all"); setProject("all"); setQuery(""); }}>Clear filters</Button>} /> : null}
         {!openTasks.length && !filteredByControls ? <EmptyState title="No open tasks" description="Add a task when something needs a place in your workspace." action={<Button type="button" variant="primary" onClick={() => setEditorTask("new")}>Add your first task</Button>} /> : null}
       </div>
     </section>
 
-    <details className="completed-tasks"><summary>Completed <span>{completedTasks.length}</span></summary>{completedTasks.length ? <ol className="full-task-list">{completedTasks.map((task) => <TaskRow key={task.id} task={task} onToggle={() => toggleTask(task.id)} onEdit={() => setEditorTask(task)} />)}</ol> : <p>No completed tasks yet.</p>}</details>
+    <details className="completed-tasks"><summary>Completed <span>{completedTasks.length}</span></summary>{completedTasks.length ? <ol className="full-task-list">{completedTasks.map((task) => <TaskRow key={task.id} task={task} onToggle={() => toggleWorkItem(task)} onEdit={() => task.generated ? setOccurrenceTask(task) : setEditorTask(task)} />)}</ol> : <p>No completed tasks yet.</p>}</details>
 
     {editorTask ? <TaskEditor key={editorTask === "new" ? "new" : editorTask.id} task={editorTask === "new" ? undefined : editorTask} onClose={() => setEditorTask(null)} onSave={saveTask} onDelete={editorTask === "new" ? undefined : () => { deleteTask(editorTask.id); setEditorTask(null); }} /> : null}
+    {occurrenceTask?.rhythmId && occurrenceTask.occurrenceDate ? <OccurrenceActionSheet task={occurrenceTask} onClose={() => setOccurrenceTask(null)} onComplete={() => { completeOccurrence({ rhythmId: occurrenceTask.rhythmId!, occurrenceDate: occurrenceTask.occurrenceDate! }); setOccurrenceTask(null); }} onUncomplete={() => { uncompleteOccurrence({ rhythmId: occurrenceTask.rhythmId!, occurrenceDate: occurrenceTask.occurrenceDate! }); setOccurrenceTask(null); }} onSkip={() => { skipOccurrence({ rhythmId: occurrenceTask.rhythmId!, occurrenceDate: occurrenceTask.occurrenceDate! }); setOccurrenceTask(null); }} onReschedule={(date, time) => { rescheduleOccurrence({ rhythmId: occurrenceTask.rhythmId!, occurrenceDate: occurrenceTask.occurrenceDate! }, date, time); setOccurrenceTask(null); }} /> : null}
   </div>;
 }

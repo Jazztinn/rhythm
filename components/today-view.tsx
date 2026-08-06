@@ -4,10 +4,11 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { ArrowUpRight, CalendarClock, Check, ChevronDown, Circle, Clock3, CloudSun, Sparkles } from "lucide-react";
 import { useRhythm } from "@/components/rhythm-provider";
+import { OccurrenceActionSheet } from "@/components/occurrence-action-sheet";
 import { EmptyState, Spinner } from "@/components/ui";
-import { addDays, resolveTaskDate, selectRecommendedTask, summarizeWorkload, toDateKey, type Task } from "@/lib/rhythm";
+import { addDays, dateRangeFrom, resolveTaskDate, selectRecommendedTask, summarizeWorkload, toDateKey, type Task } from "@/lib/rhythm";
 
-function TaskCard({ task, onToggle, recommended = false }: { task: Task; onToggle: () => void; recommended?: boolean }) {
+function TaskCard({ task, onToggle, onOpen, recommended = false }: { task: Task; onToggle: () => void; onOpen?: () => void; recommended?: boolean }) {
   return <li className={`task-card ${task.status === "completed" ? "is-done" : ""} ${recommended ? "is-recommended" : ""}`}>
     <button className="task-check" onClick={onToggle} aria-label={`${task.status === "completed" ? "Reopen" : "Complete"} ${task.title}`}>
       {task.status === "completed" ? <Check size={15} aria-hidden="true" /> : <Circle size={15} aria-hidden="true" />}
@@ -22,12 +23,14 @@ function TaskCard({ task, onToggle, recommended = false }: { task: Task; onToggl
       <time dateTime={task.dueDate}>{task.dueLabel}</time>
       <span><Clock3 size={13} aria-hidden="true" />≈ {task.estimateMinutes} min</span>
     </div>
+    {onOpen ? <button className="task-open" type="button" onClick={onOpen} aria-label={`Open ${task.title}`}><ArrowUpRight size={15} aria-hidden="true" /></button> : null}
   </li>;
 }
 
 export function TodayView() {
-  const { tasks, hydrated, toggleTask } = useRhythm();
+  const { getWorkItems, hydrated, toggleTask, completeOccurrence, uncompleteOccurrence, skipOccurrence, rescheduleOccurrence } = useRhythm();
   const [laterOpen, setLaterOpen] = useState(false);
+  const [occurrenceTask, setOccurrenceTask] = useState<Task | null>(null);
   const [now, setNow] = useState(() => new Date(1704110400000));
 
   useEffect(() => {
@@ -37,17 +40,18 @@ export function TodayView() {
   }, []);
 
   const todayKey = toDateKey(now);
-  const todayTasks = tasks.filter((task) => {
+  const workItems = getWorkItems(dateRangeFrom(now, 365, 365));
+  const todayTasks = workItems.filter((task) => {
     const date = resolveTaskDate(task, now);
     return !task.later && (!date || date <= todayKey);
   });
   const pending = todayTasks.filter((task) => task.status === "pending");
   const completed = todayTasks.filter((task) => task.status === "completed");
-  const later = tasks.filter((task) => task.later || (resolveTaskDate(task, now) ?? todayKey) > todayKey);
+  const later = workItems.filter((task) => task.later || (resolveTaskDate(task, now) ?? todayKey) > todayKey);
   const recommended = selectRecommendedTask(todayTasks, now);
   const summary = summarizeWorkload(todayTasks);
   const progress = todayTasks.length ? Math.round((completed.length / todayTasks.length) * 100) : 0;
-  const nextScheduled = tasks
+  const nextScheduled = workItems
     .filter((task) => task.status === "pending" && task.dueTime)
     .map((task) => {
       const date = resolveTaskDate(task, now);
@@ -64,11 +68,18 @@ export function TodayView() {
   const week = Array.from({ length: 7 }, (_, index) => {
     const date = addDays(weekStart, index);
     const key = toDateKey(date);
-    const minutes = tasks.filter((task) => task.status === "pending" && resolveTaskDate(task, now) === key).reduce((sum, task) => sum + task.estimateMinutes, 0);
+    const minutes = workItems.filter((task) => task.status === "pending" && resolveTaskDate(task, now) === key).reduce((sum, task) => sum + task.estimateMinutes, 0);
     return { day: new Intl.DateTimeFormat("en-US", { weekday: "short" }).format(date), load: Math.min(100, Math.max(8, Math.round((minutes / 240) * 100))), minutes, active: key === todayKey };
   });
 
   if (!hydrated) return <div className="today-view"><div className="loading-panel"><Spinner label="Loading Today" /><p>Preparing Today from your local workspace…</p></div></div>;
+
+  const toggleWorkItem = (task: Task) => {
+    if (task.generated && task.rhythmId && task.occurrenceDate) {
+      const occurrence = { rhythmId: task.rhythmId, occurrenceDate: task.occurrenceDate };
+      (task.status === "completed" ? uncompleteOccurrence : completeOccurrence)(occurrence);
+    } else toggleTask(task.id);
+  };
 
   return <div className="today-view">
     <header className="page-header">
@@ -102,9 +113,9 @@ export function TodayView() {
     <section className="content-grid">
       <div className="task-section">
         <div className="section-heading"><div><span className="section-kicker">Open work</span><h2>{recommended ? "Start here" : "Today"}</h2></div><span>{pending.length} remaining</span></div>
-        {pending.length ? <ol className="task-list" aria-label="Open tasks for today">{pending.map((task) => <TaskCard key={task.id} task={task} recommended={task.id === recommended?.id} onToggle={() => toggleTask(task.id)} />)}</ol> : <EmptyState title="No open tasks for today" description="Your local task list has no pending work in this view." action={<Link className="soft-button" href="/tasks">Open Tasks</Link>} />}
+        {pending.length ? <ol className="task-list" aria-label="Open tasks for today">{pending.map((task) => <TaskCard key={task.id} task={task} recommended={task.id === recommended?.id} onToggle={() => toggleWorkItem(task)} onOpen={task.generated ? () => setOccurrenceTask(task) : undefined} />)}</ol> : <EmptyState title="No open tasks for today" description="Your local task list has no pending work in this view." action={<Link className="soft-button" href="/tasks">Open Tasks</Link>} />}
         <button className={`later-toggle ${laterOpen ? "is-open" : ""}`} onClick={() => setLaterOpen((open) => !open)} aria-expanded={laterOpen}><span>Later <i>{later.length}</i></span><ChevronDown size={17} aria-hidden="true" /></button>
-        {laterOpen ? <ol className="later-list" aria-label="Later tasks">{later.map((task) => <TaskCard key={task.id} task={task} onToggle={() => toggleTask(task.id)} />)}</ol> : null}
+        {laterOpen ? <ol className="later-list" aria-label="Later tasks">{later.map((task) => <TaskCard key={task.id} task={task} onToggle={() => toggleWorkItem(task)} onOpen={task.generated ? () => setOccurrenceTask(task) : undefined} />)}</ol> : null}
       </div>
 
       <aside className="week-card">
@@ -113,5 +124,6 @@ export function TodayView() {
         <div className="week-note"><Sparkles size={16} aria-hidden="true" /><p><strong>{summary.evidence === "tasks-only" ? "Based on your tasks only." : "Based on tasks and calendar evidence."}</strong> Daily bars show estimated minutes from pending tasks.</p></div>
       </aside>
     </section>
+    {occurrenceTask?.rhythmId && occurrenceTask.occurrenceDate ? <OccurrenceActionSheet task={occurrenceTask} onClose={() => setOccurrenceTask(null)} onComplete={() => { completeOccurrence({ rhythmId: occurrenceTask.rhythmId!, occurrenceDate: occurrenceTask.occurrenceDate! }); setOccurrenceTask(null); }} onUncomplete={() => { uncompleteOccurrence({ rhythmId: occurrenceTask.rhythmId!, occurrenceDate: occurrenceTask.occurrenceDate! }); setOccurrenceTask(null); }} onSkip={() => { skipOccurrence({ rhythmId: occurrenceTask.rhythmId!, occurrenceDate: occurrenceTask.occurrenceDate! }); setOccurrenceTask(null); }} onReschedule={(date, time) => { rescheduleOccurrence({ rhythmId: occurrenceTask.rhythmId!, occurrenceDate: occurrenceTask.occurrenceDate! }, date, time); setOccurrenceTask(null); }} /> : null}
   </div>;
 }

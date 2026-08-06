@@ -3,17 +3,36 @@ import test from "node:test";
 import {
   applyAssistantActions,
   applyWorkspaceTransaction,
+  addDays,
   clampEstimateMinutes,
   createTaskFromDraft,
   createWorkspaceState,
+  generateOccurrences,
   migrateWorkspaceData,
+  rhythmOccurrenceId,
   searchTasks,
   seedRhythms,
   seedTasks,
   selectRecommendedTask,
   summarizeWorkload,
+  toDateKey,
   undoWorkspace,
+  type RhythmWeekday,
 } from "../lib/rhythm.ts";
+
+const dailyRhythm = {
+  id: "daily-test",
+  title: "Read a page",
+  note: "A small reset",
+  schedule: { frequency: "daily" as const },
+  startsOn: "2026-08-01",
+  localTime: "08:30",
+  icon: "sun" as const,
+  tone: "lime" as const,
+  project: "Personal",
+  estimateMinutes: 15,
+  priority: "low" as const,
+};
 
 test("completes a known task", () => {
   const next = applyAssistantActions(seedTasks, [
@@ -157,4 +176,88 @@ test("summaries stay truthful for zero, overloaded, disconnected, and partial ev
   assert.equal(summarizeWorkload(seedTasks, { status: "disconnected" }).evidence, "tasks-only");
   assert.equal(summarizeWorkload(seedTasks, { status: "partial", scheduledMinutes: 120 }).evidence, "partial-calendar");
   assert.match(summarizeWorkload(seedTasks, { status: "partial" }).statement, /partial calendar evidence/);
+});
+
+test("generates daily occurrences with inclusive boundaries and stable IDs", () => {
+  const items = generateOccurrences([dailyRhythm], [], [], "2026-08-09", "2026-08-11");
+  assert.deepEqual(items.map((item) => item.occurrenceDate), ["2026-08-09", "2026-08-10", "2026-08-11"]);
+  assert.deepEqual(items.map((item) => item.id), items.map((item) => rhythmOccurrenceId("daily-test", item.occurrenceDate!)));
+  assert.equal(items.every((item) => item.generated && item.source === "rhythm" && item.dueTime === "08:30"), true);
+  assert.equal(new Set(items.map((item) => item.id)).size, items.length);
+});
+
+test("generates weekly occurrences only on selected local weekdays", () => {
+  const rhythm = { ...dailyRhythm, id: "weekly-test", schedule: { frequency: "weekly" as const, weekdays: [1, 3] as RhythmWeekday[] } };
+  const items = generateOccurrences([rhythm], [], [], "2026-08-09", "2026-08-16");
+  assert.deepEqual(items.map((item) => item.occurrenceDate), ["2026-08-10", "2026-08-12", "2026-08-17"].filter((date) => date <= "2026-08-16"));
+});
+
+test("paused, archived, skipped, and completed occurrences classify correctly", () => {
+  const paused = { ...dailyRhythm, id: "paused", paused: true };
+  const archived = { ...dailyRhythm, id: "archived", archived: true };
+  const items = generateOccurrences([dailyRhythm, paused, archived], [{ rhythmId: "daily-test", occurrenceDate: "2026-08-10", kind: "skip" }], [{ rhythmId: "daily-test", occurrenceDate: "2026-08-11" }], "2026-08-09", "2026-08-11");
+  assert.deepEqual(items.map((item) => item.occurrenceDate), ["2026-08-09", "2026-08-11"]);
+  assert.equal(items.find((item) => item.occurrenceDate === "2026-08-11")?.status, "completed");
+  assert.equal(items.some((item) => item.rhythmId === "paused" || item.rhythmId === "archived"), false);
+});
+
+test("rescheduling suppresses the original date and keeps one stable identity", () => {
+  const exception = { rhythmId: "daily-test", occurrenceDate: "2026-08-01", kind: "reschedule" as const, replacementDate: "2026-08-05", replacementTime: "19:00" };
+  const items = generateOccurrences([dailyRhythm], [exception], [], "2026-08-05", "2026-08-05");
+  const rescheduled = items.find((item) => item.id === "rhythm:daily-test:2026-08-01");
+  assert.equal(items.length, 2);
+  assert.equal(rescheduled?.occurrenceDate, "2026-08-01");
+  assert.equal(rescheduled?.dueDate, "2026-08-05");
+  assert.equal(rescheduled?.dueTime, "19:00");
+  assert.equal(generateOccurrences([dailyRhythm], [exception], [], "2026-08-01", "2026-08-05").filter((item) => item.id === rescheduled?.id).length, 1);
+});
+
+test("rescheduled work coexists with the natural occurrence on its replacement date", () => {
+  const exception = { rhythmId: "daily-test", occurrenceDate: "2026-08-01", kind: "reschedule" as const, replacementDate: "2026-08-02" };
+  const items = generateOccurrences([dailyRhythm], [exception], [], "2026-08-01", "2026-08-02");
+  assert.deepEqual(items.map((item) => item.id), ["rhythm:daily-test:2026-08-01", "rhythm:daily-test:2026-08-02"]);
+  assert.deepEqual(items.map((item) => item.dueDate), ["2026-08-02", "2026-08-02"]);
+});
+
+test("startsOn prevents a new or normalized rhythm from backfilling overdue dates", () => {
+  const newRhythm = { ...dailyRhythm, id: "new-rhythm", startsOn: "2026-08-10" };
+  assert.deepEqual(generateOccurrences([newRhythm], [], [], "2026-08-01", "2026-08-11").map((item) => item.occurrenceDate), ["2026-08-10", "2026-08-11"]);
+
+  const legacy = { id: "normalized-rhythm", title: "Normalized", note: "No backfill", time: "07:00", icon: "sun", tone: "lime" };
+  const normalized = migrateWorkspaceData(null, null, { routines: [legacy] }).state.rhythms[0];
+  const today = toDateKey(new Date());
+  const yesterday = toDateKey(addDays(new Date(), -1));
+  assert.equal(normalized.startsOn, today);
+  assert.deepEqual(generateOccurrences([normalized], [], [], yesterday, today).map((item) => item.occurrenceDate), [today]);
+});
+
+test("normalizes old V3 rhythms without changing version or losing completion state", () => {
+  const oldRhythm = { id: "legacy", title: "Legacy", note: "Keep it", time: "07:00", icon: "sun", tone: "lime" };
+  const old = {
+    version: 3,
+    tasks: [],
+    rhythms: [oldRhythm],
+    exceptions: { legacy: ["2026-08-10"] },
+    completions: { "2026-08-09": ["legacy"] },
+    settings: { starterDataAvailable: true, displayName: "Jazz Tinn" },
+    history: [],
+  };
+  const result = migrateWorkspaceData(old, null, null);
+  assert.equal(result.status, "v3");
+  assert.equal(result.state.version, 3);
+  assert.deepEqual(result.state.rhythms[0].schedule, { frequency: "daily" });
+  assert.equal(result.state.rhythms[0].localTime, "07:00");
+  assert.equal(result.state.rhythms[0].startsOn, toDateKey(new Date()));
+  assert.deepEqual(result.state.rhythmExceptions, [{ rhythmId: "legacy", occurrenceDate: "2026-08-10", kind: "skip" }]);
+  assert.deepEqual(result.state.rhythmCompletions, [{ rhythmId: "legacy", occurrenceDate: "2026-08-09" }]);
+});
+
+test("rhythm transaction snapshots restore occurrence state through undo", () => {
+  const initial = createWorkspaceState([], [dailyRhythm]);
+  const changed = applyWorkspaceTransaction(initial, "Skipped occurrence", (current) => ({
+    ...current,
+    rhythmExceptions: [{ rhythmId: "daily-test", occurrenceDate: "2026-08-09", kind: "skip" }],
+  }), "2026-08-09T10:00:00.000Z");
+  assert.equal(changed.rhythmExceptions.length, 1);
+  assert.equal(undoWorkspace(changed).rhythmExceptions.length, 0);
 });
