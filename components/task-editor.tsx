@@ -1,7 +1,8 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useState } from "react";
 import { Trash2, X } from "lucide-react";
+import { Dialog } from "@/components/ui";
 import {
   resolveTaskDate,
   toDateKey,
@@ -30,14 +31,6 @@ export function TaskEditor({ task, onClose, onSave, onDelete }: TaskEditorProps)
   const [note, setNote] = useState(task?.note ?? "");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
-  useEffect(() => {
-    function handleEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", handleEscape);
-    return () => window.removeEventListener("keydown", handleEscape);
-  }, [onClose]);
-
   function submit(event: FormEvent) {
     event.preventDefault();
     if (!title.trim()) return;
@@ -54,15 +47,8 @@ export function TaskEditor({ task, onClose, onSave, onDelete }: TaskEditorProps)
   }
 
   return (
-    <div className="quick-add-backdrop" role="presentation" onMouseDown={onClose}>
-      <form
-        className="quick-add task-editor"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="task-editor-title"
-        onSubmit={submit}
-        onMouseDown={(event) => event.stopPropagation()}
-      >
+    <Dialog open onClose={onClose} title={task ? "Edit task" : "New task"} className="task-editor-dialog">
+      <form className="quick-add task-editor" onSubmit={submit}>
         <div className="editor-heading">
           <div>
             <span className="section-kicker">{task ? "Edit task" : "New task"}</span>
@@ -136,6 +122,6 @@ export function TaskEditor({ task, onClose, onSave, onDelete }: TaskEditorProps)
           </div>
         </div>
       </form>
-    </div>
+    </Dialog>
   );
 }
