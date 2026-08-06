@@ -33,6 +33,7 @@ export type RhythmDefinition = {
   title: string;
   note: string;
   schedule: RhythmSchedule;
+  startsOn: string;
   localTime?: string;
   icon: "sun" | "waves" | "moon" | "orbit";
   tone: "lime" | "violet" | "peach";
@@ -201,7 +202,9 @@ function nextDateKey(dateKey: string) {
 }
 
 function isDateKey(value: string) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(dateFromKey(value).getTime());
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = dateFromKey(value);
+  return !Number.isNaN(date.getTime()) && toDateKey(date) === value;
 }
 
 export function dateRangeFrom(now = new Date(), daysBefore = 365, daysAfter = 365) {
@@ -240,18 +243,19 @@ export function generateOccurrences(
   for (const rawDefinition of definitions) {
     const definition = normalizeRhythmDefinition(rawDefinition);
     if (definition.paused || definition.archived) continue;
+    const generationStart = definition.startsOn > start ? definition.startsOn : start;
+    if (generationStart > end) continue;
     const occurrenceDates = new Set<string>();
-    for (let occurrenceDate = start; occurrenceDate <= end; occurrenceDate = nextDateKey(occurrenceDate)) occurrenceDates.add(occurrenceDate);
-    const rescheduledTargets = new Set(exceptionList(exceptions).filter((exception) => exception.rhythmId === definition.id && exception.kind === "reschedule" && exception.replacementDate).map((exception) => exception.replacementDate!));
+    for (let occurrenceDate = generationStart; occurrenceDate <= end; occurrenceDate = nextDateKey(occurrenceDate)) occurrenceDates.add(occurrenceDate);
     for (const exception of exceptionList(exceptions)) {
-      if (exception.rhythmId === definition.id && exception.kind === "reschedule" && exception.replacementDate && exception.replacementDate >= start && exception.replacementDate <= end) occurrenceDates.add(exception.occurrenceDate);
+      if (exception.rhythmId === definition.id && exception.kind === "reschedule" && exception.occurrenceDate >= definition.startsOn && exception.replacementDate && exception.replacementDate >= start && exception.replacementDate <= end) occurrenceDates.add(exception.occurrenceDate);
     }
     for (const occurrenceDate of [...occurrenceDates].sort()) {
       if (!isDateKey(occurrenceDate)) continue;
+      if (occurrenceDate < definition.startsOn) continue;
       if (!followsSchedule(definition, occurrenceDate)) continue;
       const exception = exceptionByKey.get(`${definition.id}:${occurrenceDate}`);
       if (exception?.kind === "skip") continue;
-      if (!exception && rescheduledTargets.has(occurrenceDate)) continue;
       const dueDate = exception?.kind === "reschedule" && exception.replacementDate
         ? exception.replacementDate
         : occurrenceDate;
@@ -431,9 +435,9 @@ export const seedTasks: Task[] = [
 ];
 
 export const seedRhythms: RhythmDefinition[] = [
-  { id: "morning", title: "Start softly", note: "Water, sunlight, no inbox", schedule: { frequency: "daily" }, localTime: "08:00", icon: "sun", tone: "lime", project: "Personal", estimateMinutes: 15, priority: "low" },
-  { id: "focus", title: "Protect one deep block", note: "One important thing, fully present", schedule: { frequency: "daily" }, localTime: "10:00", icon: "waves", tone: "violet", project: "Personal", estimateMinutes: 45, priority: "medium" },
-  { id: "shutdown", title: "Close the loops", note: "Review, reset, step away", schedule: { frequency: "daily" }, localTime: "20:30", icon: "moon", tone: "peach", project: "Personal", estimateMinutes: 20, priority: "low" },
+  { id: "morning", title: "Start softly", note: "Water, sunlight, no inbox", schedule: { frequency: "daily" }, startsOn: toDateKey(new Date()), localTime: "08:00", icon: "sun", tone: "lime", project: "Personal", estimateMinutes: 15, priority: "low" },
+  { id: "focus", title: "Protect one deep block", note: "One important thing, fully present", schedule: { frequency: "daily" }, startsOn: toDateKey(new Date()), localTime: "10:00", icon: "waves", tone: "violet", project: "Personal", estimateMinutes: 45, priority: "medium" },
+  { id: "shutdown", title: "Close the loops", note: "Review, reset, step away", schedule: { frequency: "daily" }, startsOn: toDateKey(new Date()), localTime: "20:30", icon: "moon", tone: "peach", project: "Personal", estimateMinutes: 20, priority: "low" },
 ];
 
 export const WORKSPACE_STORAGE_KEY = "rhythm.workspace.v3";
@@ -468,6 +472,7 @@ function normalizeWeekdays(value: unknown, fallback: RhythmWeekday[] = [1]) {
 
 export function normalizeRhythmDefinition(value: RhythmDefinition | Record<string, unknown>): RhythmDefinition {
   const raw = value as Record<string, unknown>;
+  const defaultStartsOn = toDateKey(new Date());
   const legacyTime = typeof raw.time === "string" ? raw.time : undefined;
   const rawSchedule = isRecord(raw.schedule) ? raw.schedule : undefined;
   const frequency = rawSchedule?.frequency === "weekly" ? "weekly" : "daily";
@@ -480,6 +485,7 @@ export function normalizeRhythmDefinition(value: RhythmDefinition | Record<strin
       frequency,
       ...(frequency === "weekly" ? { weekdays: normalizeWeekdays(rawSchedule?.weekdays) } : {}),
     },
+    startsOn: typeof raw.startsOn === "string" && isDateKey(raw.startsOn) ? raw.startsOn : defaultStartsOn,
     ...(localTime ? { localTime } : {}),
     icon: ["sun", "waves", "moon", "orbit"].includes(raw.icon as string) ? raw.icon as RhythmDefinition["icon"] : "orbit",
     tone: ["lime", "violet", "peach"].includes(raw.tone as string) ? raw.tone as RhythmDefinition["tone"] : "lime",
@@ -530,6 +536,7 @@ export function isRhythmDefinition(value: unknown): value is RhythmDefinition {
   const hasLegacyTime = typeof value.time === "string";
   return typeof value.id === "string" && typeof value.title === "string" &&
     typeof value.note === "string" && (hasSchedule || hasLegacyTime) &&
+    (value.startsOn === undefined || (typeof value.startsOn === "string" && isDateKey(value.startsOn))) &&
     ["sun", "waves", "moon", "orbit"].includes(value.icon as string) &&
     ["lime", "violet", "peach"].includes(value.tone as string);
 }

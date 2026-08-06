@@ -14,6 +14,7 @@ import {
   LEGACY_RHYTHMS_STORAGE_KEY,
   LEGACY_TASKS_STORAGE_KEY,
   migrateWorkspaceData,
+  normalizeRhythmDefinition,
   resolveTaskDate,
   seedRhythms,
   seedTasks,
@@ -239,11 +240,11 @@ export function RhythmProvider({ children }: { children: React.ReactNode }) {
   }, [commitTransaction, workspace.rhythmCompletions, workspace.rhythms]);
 
   const createRhythm = useCallback((rhythm: RhythmDefinition) => {
-    commitTransaction("Added rhythm", (current) => ({ ...current, rhythms: [...current.rhythms, rhythm] }));
+    commitTransaction("Added rhythm", (current) => ({ ...current, rhythms: [...current.rhythms, normalizeRhythmDefinition(rhythm)] }));
   }, [commitTransaction]);
 
   const updateRhythm = useCallback((id: string, rhythm: RhythmDefinition) => {
-    commitTransaction("Edited rhythm", (current) => ({ ...current, rhythms: current.rhythms.map((item) => item.id === id ? rhythm : item) }));
+    commitTransaction("Edited rhythm", (current) => ({ ...current, rhythms: current.rhythms.map((item) => item.id === id ? normalizeRhythmDefinition(rhythm) : item) }));
   }, [commitTransaction]);
 
   const pauseRhythm = useCallback((id: string) => {

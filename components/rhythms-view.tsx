@@ -89,7 +89,7 @@ export function RhythmsView() {
   }, []);
 
   function saveRhythm(form: RhythmForm) {
-    const next: RhythmDefinition = { id: editorRhythm && editorRhythm !== "new" ? editorRhythm.id : `rhythm-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, title: form.title.trim(), note: form.note.trim() || "A small promise worth keeping", schedule: { frequency: form.frequency, ...(form.frequency === "weekly" ? { weekdays: [...new Set(form.selectedWeekdays)] } : {}) }, ...(form.localTime ? { localTime: form.localTime } : {}), project: form.project.trim() || "Personal", estimateMinutes: form.estimateMinutes, priority: form.priority, icon: form.icon, tone: form.tone, paused: editorRhythm && editorRhythm !== "new" ? editorRhythm.paused : false, archived: false };
+    const next: RhythmDefinition = { id: editorRhythm && editorRhythm !== "new" ? editorRhythm.id : `rhythm-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, title: form.title.trim(), note: form.note.trim() || "A small promise worth keeping", schedule: { frequency: form.frequency, ...(form.frequency === "weekly" ? { weekdays: [...new Set(form.selectedWeekdays)] } : {}) }, startsOn: editorRhythm && editorRhythm !== "new" ? editorRhythm.startsOn : toDateKey(new Date()), ...(form.localTime ? { localTime: form.localTime } : {}), project: form.project.trim() || "Personal", estimateMinutes: form.estimateMinutes, priority: form.priority, icon: form.icon, tone: form.tone, paused: editorRhythm && editorRhythm !== "new" ? editorRhythm.paused : false, archived: false };
     if (editorRhythm && editorRhythm !== "new") updateRhythm(editorRhythm.id, next);
     else createRhythm(next);
     setEditorRhythm(null);
