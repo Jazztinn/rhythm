@@ -1,41 +1,61 @@
 "use client";
 
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
-import { gsap } from "gsap";
-import { Check, Circle, Clock3, ListFilter, Pencil, Plus, RotateCcw, Search, Sparkles } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Check, Circle, Clock3, Pencil, Plus, Search } from "lucide-react";
 import { useRhythm } from "@/components/rhythm-provider";
+import { EmptyState, Button, Spinner } from "@/components/ui";
+import { resolveTaskDate, toDateKey, type Task, type TaskDraft } from "@/lib/rhythm";
 import { TaskEditor } from "@/components/task-editor";
-import type { Task, TaskDraft, TaskStatus } from "@/lib/rhythm";
 
-type Filter = "all" | TaskStatus;
+type Filter = "all" | "today" | "overdue" | "upcoming" | "later";
+
+function taskBucket(task: Task, today: string): Exclude<Filter, "all"> {
+  if (task.later) return "later";
+  const date = resolveTaskDate(task, new Date(`${today}T12:00:00`));
+  if (!date || date === today) return "today";
+  return date < today ? "overdue" : "upcoming";
+}
+
+function TaskRow({ task, onToggle, onEdit }: { task: Task; onToggle: () => void; onEdit: () => void }) {
+  return <li className={`full-task-row ${task.status === "completed" ? "is-done" : ""}`}>
+    <button onClick={onToggle} aria-label={`${task.status === "completed" ? "Reopen" : "Complete"} ${task.title}`}>{task.status === "completed" ? <Check size={16} aria-hidden="true" /> : <Circle size={16} aria-hidden="true" />}</button>
+    <span className={`priority-dot priority-${task.priority}`} aria-label={`${task.priority} priority`} />
+    <div><span>{task.project}</span><h3>{task.title}</h3>{task.note ? <p>{task.note}</p> : null}</div>
+    <time dateTime={task.dueDate}>{task.dueLabel}</time><small><Clock3 size={13} aria-hidden="true" /> {task.estimateMinutes} min</small>
+    <button className="task-edit-button" onClick={onEdit} aria-label={`Edit ${task.title}`}><Pencil size={15} aria-hidden="true" /></button>
+  </li>;
+}
 
 export function TasksView() {
-  const root = useRef<HTMLDivElement>(null);
-  const { tasks, toggleTask, createTask, updateTask, deleteTask, undo, canUndo } = useRhythm();
+  const { tasks, hydrated, toggleTask, createTask, updateTask, deleteTask, canUndo, undoLast } = useRhythm();
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
+  const [project, setProject] = useState("all");
   const [editorTask, setEditorTask] = useState<Task | "new" | null>(null);
+  const today = toDateKey(new Date());
+  const projects = useMemo(() => [...new Set(tasks.map((task) => task.project).filter(Boolean))].sort(), [tasks]);
 
+  useEffect(() => {
+    if (!hydrated) return;
+    const timer = window.setTimeout(() => {
+      const requestedId = new URLSearchParams(window.location.search).get("task");
+      const requestedTask = requestedId ? tasks.find((task) => task.id === requestedId) : undefined;
+      if (requestedTask) setEditorTask(requestedTask);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [hydrated, tasks]);
+
+  const openTasks = useMemo(() => tasks.filter((task) => task.status === "pending"), [tasks]);
+  const completedTasks = useMemo(() => tasks.filter((task) => task.status === "completed"), [tasks]);
   const visibleTasks = useMemo(() => {
-    const clean = query.trim().toLowerCase();
-    return tasks.filter((task) => {
-      const matchesFilter = filter === "all" || task.status === filter;
-      const matchesQuery = !clean || `${task.title} ${task.project}`.toLowerCase().includes(clean);
-      return matchesFilter && matchesQuery;
+    const clean = query.trim().toLocaleLowerCase();
+    return openTasks.filter((task) => {
+      const matchesFilter = filter === "all" || taskBucket(task, today) === filter;
+      const matchesQuery = !clean || `${task.title} ${task.project} ${task.note ?? ""}`.toLocaleLowerCase().includes(clean);
+      const matchesProject = project === "all" || task.project === project;
+      return matchesFilter && matchesQuery && matchesProject;
     });
-  }, [filter, query, tasks]);
-
-  const pending = tasks.filter((task) => task.status === "pending");
-  const focusedMinutes = pending.reduce((sum, task) => sum + task.estimateMinutes, 0);
-
-  useLayoutEffect(() => {
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    const context = gsap.context(() => {
-      gsap.from("[data-workspace-reveal]", { opacity: 0, y: 18, duration: 0.7, stagger: 0.07, ease: "power3.out" });
-      gsap.to(".tasks-glow", { xPercent: 9, yPercent: -5, duration: 8, repeat: -1, yoyo: true, ease: "sine.inOut" });
-    }, root);
-    return () => context.revert();
-  }, []);
+  }, [filter, openTasks, project, query, today]);
 
   function saveTask(draft: TaskDraft) {
     if (editorTask === "new") createTask(draft);
@@ -43,60 +63,38 @@ export function TasksView() {
     setEditorTask(null);
   }
 
-  return (
-    <div className="workspace-view" ref={root}>
-      <header className="workspace-header" data-workspace-reveal>
-        <div><p className="eyebrow">Everything in one place</p><h1>Tasks</h1><p className="page-subtitle">A quiet inventory of what deserves your attention.</p></div>
-        <div className="workspace-header-actions">
-          {canUndo ? <button className="soft-button" onClick={undo}><RotateCcw size={15} /> Undo</button> : null}
-          <button className="primary-button" onClick={() => setEditorTask("new")}><Plus size={17} /> Add task</button>
-        </div>
-      </header>
+  if (!hydrated) return <div className="workspace-view"><div className="loading-panel"><Spinner label="Loading tasks" /><p>Preparing Tasks from your local workspace…</p></div></div>;
 
-      <section className="tasks-summary" data-workspace-reveal>
-        <article className="metric-card metric-card--lime">
-          <span className="tasks-glow" aria-hidden="true" />
-          <div className="metric-top"><span>Open tasks</span><i>Today</i></div>
-          <strong>{String(pending.length).padStart(2, "0")}</strong>
-          <p>{pending.length <= 4 ? "Your list feels breathable." : "Choose three. Let the rest wait."}</p>
-        </article>
-        <article className="metric-card metric-card--peach"><div className="metric-top"><span>Planned focus</span><Clock3 size={16} /></div><strong>{Math.floor(focusedMinutes / 60)}<small>h</small> {focusedMinutes % 60}<small>m</small></strong><p>Across every open task.</p></article>
-        <article className="metric-card metric-card--paper"><div className="metric-top"><span>Completion</span><Sparkles size={16} /></div><strong>{tasks.length ? Math.round(((tasks.length - pending.length) / tasks.length) * 100) : 100}<small>%</small></strong><p>Small progress still counts.</p></article>
-      </section>
+  const filterLabels: Array<[Filter, string]> = [["all", "All open"], ["today", "Today"], ["overdue", "Overdue"], ["upcoming", "Upcoming"], ["later", "Later"]];
+  const filteredByControls = Boolean(query.trim() || project !== "all" || filter !== "all");
 
-      <section className="workspace-panel" data-workspace-reveal>
-        <div className="task-toolbar">
-          <div className="filter-tabs" aria-label="Filter tasks">
-            {(["all", "pending", "completed"] as Filter[]).map((value) => <button key={value} className={filter === value ? "is-active" : ""} onClick={() => setFilter(value)}>{value}</button>)}
-          </div>
-          <label className="task-search"><Search size={15} /><span className="sr-only">Search tasks</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search tasks" /></label>
-        </div>
-        <div className="full-task-list">
-          {visibleTasks.map((task) => (
-            <article className={`full-task-row ${task.status === "completed" ? "is-done" : ""}`} key={task.id}>
-              <button onClick={() => toggleTask(task.id)} aria-label={`${task.status === "completed" ? "Reopen" : "Complete"} ${task.title}`}>{task.status === "completed" ? <Check size={16} /> : <Circle size={16} />}</button>
-              <span className={`priority-dot priority-${task.priority}`} />
-              <div><span>{task.project}</span><h2>{task.title}</h2></div>
-              <p>{task.dueLabel}</p><small><Clock3 size={13} /> {task.estimateMinutes} min</small>
-              <button className="task-edit-button" onClick={() => setEditorTask(task)} aria-label={`Edit ${task.title}`}><Pencil size={15} /></button>
-            </article>
-          ))}
-          {!visibleTasks.length ? <div className="empty-filter"><ListFilter size={18} /> No tasks match this view.</div> : null}
-        </div>
-      </section>
+  return <div className="workspace-view tasks-view">
+    <header className="workspace-header">
+      <div><p className="eyebrow">A factual task inventory</p><h1>Tasks</h1><p className="page-subtitle">{openTasks.length} open · {completedTasks.length} completed · {openTasks.reduce((sum, task) => sum + task.estimateMinutes, 0)} minutes planned</p></div>
+      <div className="workspace-header-actions">{canUndo ? <Button type="button" onClick={undoLast}>Undo last change</Button> : null}<Button variant="primary" onClick={() => setEditorTask("new")}><Plus size={17} aria-hidden="true" /> Add task</Button></div>
+    </header>
 
-      {editorTask ? (
-        <TaskEditor
-          key={editorTask === "new" ? "new" : editorTask.id}
-          task={editorTask === "new" ? undefined : editorTask}
-          onClose={() => setEditorTask(null)}
-          onSave={saveTask}
-          onDelete={editorTask === "new" ? undefined : () => {
-            deleteTask(editorTask.id);
-            setEditorTask(null);
-          }}
-        />
-      ) : null}
-    </div>
-  );
+    <section className="task-summary-line" aria-label="Task summary"><strong>{openTasks.length} open task{openTasks.length === 1 ? "" : "s"}</strong><span>{openTasks.reduce((sum, task) => sum + task.estimateMinutes, 0)} estimated minutes</span><span>Completed tasks are kept below.</span></section>
+
+    <section className="workspace-panel tasks-panel">
+      <div className="task-toolbar">
+        <div className="filter-tabs" aria-label="Task views">{filterLabels.map(([value, label]) => <button key={value} type="button" className={filter === value ? "is-active" : ""} aria-pressed={filter === value} onClick={() => setFilter(value)}>{label}</button>)}</div>
+        <label className="task-search"><Search size={15} aria-hidden="true" /><span className="sr-only">Search tasks, projects, and notes</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search tasks, projects, notes" /></label>
+        {projects.length > 1 ? <label className="project-filter"><span className="sr-only">Filter by project</span><select value={project} onChange={(event) => setProject(event.target.value)}><option value="all">All projects</option>{projects.map((name) => <option key={name} value={name}>{name}</option>)}</select></label> : null}
+      </div>
+      <div className="task-groups">
+        {filterLabels.slice(1).map(([bucket, label]) => {
+          const group = visibleTasks.filter((task) => taskBucket(task, today) === bucket);
+          if (filter !== "all" && filter !== bucket) return null;
+          return <section className="task-group" key={bucket} aria-labelledby={`task-group-${bucket}`}><div className="task-group__heading"><h2 id={`task-group-${bucket}`}>{label}</h2><span>{group.length}</span></div>{group.length ? <ol className="full-task-list" aria-label={`${label} tasks`}>{group.map((task) => <TaskRow key={task.id} task={task} onToggle={() => toggleTask(task.id)} onEdit={() => setEditorTask(task)} />)}</ol> : <p className="task-group__empty">No {label.toLocaleLowerCase()} open tasks.</p>}</section>;
+        })}
+        {!visibleTasks.length && filteredByControls ? <EmptyState title="No tasks match these filters" description="Try another view, project, or search term." action={<Button type="button" onClick={() => { setFilter("all"); setProject("all"); setQuery(""); }}>Clear filters</Button>} /> : null}
+        {!openTasks.length && !filteredByControls ? <EmptyState title="No open tasks" description="Add a task when something needs a place in your workspace." action={<Button type="button" variant="primary" onClick={() => setEditorTask("new")}>Add your first task</Button>} /> : null}
+      </div>
+    </section>
+
+    <details className="completed-tasks"><summary>Completed <span>{completedTasks.length}</span></summary>{completedTasks.length ? <ol className="full-task-list">{completedTasks.map((task) => <TaskRow key={task.id} task={task} onToggle={() => toggleTask(task.id)} onEdit={() => setEditorTask(task)} />)}</ol> : <p>No completed tasks yet.</p>}</details>
+
+    {editorTask ? <TaskEditor key={editorTask === "new" ? "new" : editorTask.id} task={editorTask === "new" ? undefined : editorTask} onClose={() => setEditorTask(null)} onSave={saveTask} onDelete={editorTask === "new" ? undefined : () => { deleteTask(editorTask.id); setEditorTask(null); }} /> : null}
+  </div>;
 }
