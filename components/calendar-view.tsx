@@ -6,6 +6,7 @@ import { gsap } from "gsap";
 import { ArrowLeft, ArrowRight, CalendarDays, Clock3, Sparkles } from "lucide-react";
 import { useRhythm } from "@/components/rhythm-provider";
 import { OccurrenceActionSheet } from "@/components/occurrence-action-sheet";
+import { GoogleCalendarPanel } from "@/components/google-calendar-panel";
 import { addDays, dateRangeFrom, resolveTaskDate, toDateKey, type Task } from "@/lib/rhythm";
 
 const hours = [8, 10, 12, 14, 16, 18, 20, 22];
@@ -60,7 +61,6 @@ export function CalendarView() {
   const scheduled = weekTasks.filter((task) => task.dueTime);
   const unscheduled = workItems.filter((task) => task.status === "pending" && (!resolveTaskDate(task, now) || !task.dueTime));
   const plannedMinutes = weekTasks.filter((task) => task.status === "pending").reduce((sum, task) => sum + task.estimateMinutes, 0);
-  const roomMinutes = Math.max(0, 40 * 60 - plannedMinutes);
   const upcoming = workItems
     .filter((task) => task.status === "pending")
     .map((task) => ({ task, date: taskDate(task, now) }))
@@ -92,7 +92,7 @@ export function CalendarView() {
         <span className="weather"><CalendarDays size={15} /> Live tasks</span>
       </header>
       <section className="calendar-summary" data-workspace-reveal>
-        <article className="availability-card"><div><span className="section-kicker"><Sparkles size={14} /> Dated task minutes</span><h2>{plannedMinutes ? `${Math.floor(plannedMinutes / 60)}h ${plannedMinutes % 60}m planned.` : "No dated tasks yet."}</h2><p>Based on your dated tasks only: {weekTasks.length} task{weekTasks.length === 1 ? "" : "s"}. The remaining figure compares this list with a 40-hour reference, not your actual availability.</p></div><strong>{String(Math.floor(roomMinutes / 60)).padStart(2, "0")}<small>h</small><br />{String(roomMinutes % 60).padStart(2, "0")}<small>m</small></strong></article>
+        <article className="availability-card"><div><span className="section-kicker"><Sparkles size={14} /> Dated task minutes</span><h2>{plannedMinutes ? `${Math.floor(plannedMinutes / 60)}h ${plannedMinutes % 60}m planned.` : "No dated tasks yet."}</h2><p>Based on your dated tasks only: {weekTasks.length} task{weekTasks.length === 1 ? "" : "s"}. Rhythm does not estimate your availability without evidence.</p></div></article>
         <article className="next-event-card"><span className="section-kicker"><Clock3 size={14} /> Up next</span><strong>{upcoming?.task.title ?? "Nothing scheduled"}</strong><p>{upcoming ? new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(upcoming.date) : "Add a date and time from Tasks."}</p><div><i /> {upcoming ? `${upcoming.task.estimateMinutes} min · ${upcoming.task.project}` : "Your calendar is clear"}</div></article>
       </section>
       <section className="calendar-panel" data-workspace-reveal ref={calendarPanel}>
@@ -111,6 +111,11 @@ export function CalendarView() {
           })}
         </div>
       </section>
+      <section className="calendar-agenda-mobile" aria-label="Mobile agenda">
+        <div className="section-heading compact"><div><span className="section-kicker"><CalendarDays size={14} /> Agenda</span><h2>This week</h2></div><span>{weekTasks.length} local task{weekTasks.length === 1 ? "" : "s"}</span></div>
+        {weekTasks.length ? <div>{weekTasks.slice().sort((a, b) => `${resolveTaskDate(a, now) ?? "9999"}T${a.dueTime ?? "99:99"}`.localeCompare(`${resolveTaskDate(b, now) ?? "9999"}T${b.dueTime ?? "99:99"}`)).map((task) => <Link href="/tasks" key={task.id}><time>{task.dueTime ?? "Flexible"}</time><span><strong>{task.title}</strong><small>{resolveTaskDate(task, now) ?? "No date"} · {task.estimateMinutes} min</small></span></Link>)}</div> : <p className="provider-empty">No local tasks in this week.</p>}
+      </section>
+      <GoogleCalendarPanel start={days[0].toISOString()} end={addDays(days[6], 1).toISOString()} tasks={weekTasks} />
       <aside className="calendar-task-strip" data-workspace-reveal><span>{unscheduled.length} need a time</span>{unscheduled.slice(0, 4).map((task) => <Link href="/tasks" key={task.id}><article><i /><div><strong>{task.title}</strong><small>{task.generated ? "From Rhythm · " : ""}{task.estimateMinutes} min · {task.project}</small></div></article></Link>)}</aside>
       {occurrenceTask?.rhythmId && occurrenceTask.occurrenceDate ? <OccurrenceActionSheet task={occurrenceTask} onClose={() => setOccurrenceTask(null)} onComplete={() => { completeOccurrence({ rhythmId: occurrenceTask.rhythmId!, occurrenceDate: occurrenceTask.occurrenceDate! }); setOccurrenceTask(null); }} onUncomplete={() => { uncompleteOccurrence({ rhythmId: occurrenceTask.rhythmId!, occurrenceDate: occurrenceTask.occurrenceDate! }); setOccurrenceTask(null); }} onSkip={() => { skipOccurrence({ rhythmId: occurrenceTask.rhythmId!, occurrenceDate: occurrenceTask.occurrenceDate! }); setOccurrenceTask(null); }} onReschedule={(date, time) => { rescheduleOccurrence({ rhythmId: occurrenceTask.rhythmId!, occurrenceDate: occurrenceTask.occurrenceDate! }, date, time); setOccurrenceTask(null); }} /> : null}
     </div>

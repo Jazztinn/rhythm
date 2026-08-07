@@ -129,7 +129,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <span className="section-kicker">Local workspace</span>
           <strong>Jazz Tinn</strong>
           <p>{tasks.length - completed} open · {completed} complete</p>
-          <div><Link href="/tasks" onClick={() => setProfileOpen(false)}>Manage tasks</Link><ConfirmAction label="Restore starter data" title="Restore starter data?" description="This replaces the current local tasks and rhythms with the starter workspace. Your current workspace will be kept as an undo snapshot." confirmLabel="Restore starter data" onConfirm={() => { recoverStorage(); setProfileOpen(false); }} /></div>
+          <div><Link href="/settings" onClick={() => setProfileOpen(false)}>Settings & connections</Link><Link href="/tasks" onClick={() => setProfileOpen(false)}>Manage tasks</Link><ConfirmAction label="Restore starter data" title="Restore starter data?" description="This replaces the current local tasks and rhythms with the starter workspace. Your current workspace will be kept as an undo snapshot." confirmLabel="Restore starter data" onConfirm={() => { recoverStorage(); setProfileOpen(false); }} /></div>
         </div> : null}
       </div>
     </aside>
