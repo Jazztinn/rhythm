@@ -240,6 +240,59 @@ export function dateRangeFrom(now = new Date(), daysBefore = 365, daysAfter = 36
   return { start: toDateKey(addDays(now, -daysBefore)), end: toDateKey(addDays(now, daysAfter)) };
 }
 
+export type AiContextTask = {
+  id: string;
+  title: string;
+  project: string;
+  dueLabel: string;
+  estimateMinutes: number;
+  status: TaskStatus;
+  priority: TaskPriority;
+  source: TaskSource;
+  later: boolean;
+  dueDate?: string;
+  dueTime?: string;
+  note?: string;
+  rhythmId?: string;
+  occurrenceDate?: string;
+  generated?: boolean;
+};
+
+/** Build the bounded, provider-safe work context used by Ask Rhythm. */
+export function buildAiContext(workItems: Task[], now = new Date(), maxItems = 120): AiContextTask[] {
+  const generatedRange = dateRangeFrom(now, 30, 90);
+  const unique = new Map<string, Task>();
+  for (const task of workItems) {
+    if (task.generated) {
+      const relevantDate = task.dueDate ?? task.occurrenceDate;
+      if (!relevantDate || relevantDate < generatedRange.start || relevantDate > generatedRange.end) continue;
+    }
+    if (!unique.has(task.id)) unique.set(task.id, task);
+  }
+  const ordered = [...unique.values()].sort((first, second) => {
+    const statusRank = Number(first.status !== "pending") - Number(second.status !== "pending");
+    const dueRank = (first.dueDate ?? first.occurrenceDate ?? "9999-12-31").localeCompare(second.dueDate ?? second.occurrenceDate ?? "9999-12-31");
+    return statusRank || dueRank || Number(first.generated) - Number(second.generated) || first.id.localeCompare(second.id);
+  });
+  return ordered.slice(0, Math.min(120, Math.max(0, maxItems))).map((task) => ({
+    id: task.id,
+    title: task.title,
+    project: task.project,
+    dueLabel: task.dueLabel,
+    estimateMinutes: task.estimateMinutes,
+    status: task.status,
+    priority: task.priority,
+    source: task.source,
+    later: task.later,
+    ...(task.dueDate ? { dueDate: task.dueDate } : {}),
+    ...(task.dueTime ? { dueTime: task.dueTime } : {}),
+    ...(task.note ? { note: task.note } : {}),
+    ...(task.rhythmId ? { rhythmId: task.rhythmId } : {}),
+    ...(task.occurrenceDate ? { occurrenceDate: task.occurrenceDate } : {}),
+    ...(task.generated ? { generated: true } : {}),
+  }));
+}
+
 export function rhythmOccurrenceId(rhythmId: string, occurrenceDate: string) {
   return `rhythm:${rhythmId}:${occurrenceDate}`;
 }
@@ -865,7 +918,7 @@ function proposalActionFingerprint(action: AssistantAction) {
 }
 
 export function validateAiProposal(proposal: AiActionProposal, workItems: Task[]): ProposalValidation {
-  if (proposal.status !== "pending") return { ok: false, issue: "This proposal is no longer pending." };
+  if (proposal.status !== "pending" && proposal.status !== "edited") return { ok: false, issue: "This proposal is no longer pending." };
   if (!Number.isFinite(proposal.confidence) || proposal.confidence < 0.8) return { ok: false, issue: "Rhythm needs more certainty before suggesting this change." };
 
   if (proposal.action.type === "create_task") {

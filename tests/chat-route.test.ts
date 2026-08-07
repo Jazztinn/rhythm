@@ -124,6 +124,22 @@ test("uses Gemini structured JSON and returns only safe task proposals", async (
   delete process.env.GEMINI_MODEL;
 });
 
+test("normalizes duplicate provider proposal IDs without changing target dedupe", async () => {
+  process.env.GEMINI_API_KEY = "test-key";
+  provider = async () => ({
+    text: JSON.stringify({
+      message: "I prepared two proposals.", suggestions: [], proposals: [
+        { id: "same-id", confidence: 0.99, reason: "Exact target", action: { type: "reschedule_task", taskId: "monday-meeting", title: null, project: null, dueLabel: "Friday", estimateMinutes: null } },
+        { id: "same-id", confidence: 0.99, reason: "Exact target", action: { type: "complete_task", taskId: "reply-casey", title: null, project: null, dueLabel: null, estimateMinutes: null } },
+      ],
+    }),
+  });
+  const response = await POST(request(payload));
+  const result = await response.json();
+  assert.equal(response.status, 200);
+  assert.deepEqual(result.proposals.map((proposal: { id: string }) => proposal.id), ["same-id", "same-id-2"]);
+});
+
 test("asks for clarification when current tasks have similarly named targets", async () => {
   process.env.GEMINI_API_KEY = "test-key";
   provider = async () => ({

@@ -5,6 +5,7 @@ import {
   applyAssistantActions,
   applyWorkspaceTransaction,
   addDays,
+  buildAiContext,
   clampEstimateMinutes,
   createTaskFromDraft,
   createWorkspaceState,
@@ -281,6 +282,37 @@ test("proposal validation blocks low-confidence, stale, completed, and conflicti
   assert.equal(result.ok, false);
   assert.equal(result.valid.length, 1);
   assert.match(result.issues.join(" "), /current workspace|already complete|certainty|conflicting/i);
+});
+
+test("edited create and reschedule proposals revalidate and apply only after approval", () => {
+  const target = seedTasks[0];
+  const create: AiActionProposal = {
+    id: "edited-create", action: { type: "create_task", taskId: null, title: "Review portfolio", project: "Growth", dueLabel: "Tomorrow", estimateMinutes: 30 },
+    targetSummary: "New task “Review portfolio” · Growth · Tomorrow", confidence: 0.99, reason: "Edited task draft", status: "edited",
+  };
+  const reschedule: AiActionProposal = {
+    id: "edited-reschedule", action: { type: "reschedule_task", taskId: target.id, title: null, project: null, dueLabel: "Friday morning", estimateMinutes: null },
+    targetSummary: taskTargetSummary(target), confidence: 0.99, reason: "Edited destination", status: "edited",
+  };
+  const initial = createWorkspaceState([target], []);
+  const validation = validateAiProposals([create, reschedule], [target]);
+  assert.equal(validation.ok, true);
+  assert.equal(validation.valid.length, 2);
+  assert.equal(initial.tasks.length, 1);
+  const approved = applyAiActionProposals(initial, validation.valid, { createTaskId: () => "edited-create-task" });
+  assert.equal(approved.tasks.length, 2);
+  assert.equal(approved.tasks[0].id, "edited-create-task");
+  assert.equal(approved.tasks.find((task) => task.id === target.id)?.dueLabel, "Friday morning");
+});
+
+test("AI context keeps manual and relevant generated work, dedupes IDs, and strips provider references", () => {
+  const now = new Date("2026-08-09T12:00:00");
+  const manual = { ...seedTasks[0], calendarReference: "provider-secret" };
+  const generated = generateOccurrences([dailyRhythm], [], [], "2026-08-09", "2026-08-10")[0];
+  const context = buildAiContext([manual, generated, { ...manual }], now);
+  assert.deepEqual(new Set(context.map((task) => task.id)), new Set([manual.id, generated.id]));
+  assert.equal(context.some((task) => "calendarReference" in task), false);
+  assert.equal(context.find((task) => task.id === generated.id)?.generated, true);
 });
 
 test("generated occurrence proposals use occurrence semantics and one undo snapshot", () => {

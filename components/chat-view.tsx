@@ -7,6 +7,7 @@ import { Button, Dialog, StatusMessage } from "@/components/ui";
 import { useRhythm } from "@/components/rhythm-provider";
 import {
   applyAiActionProposals,
+  buildAiContext,
   dateRangeFrom,
   formatTaskDue,
   taskTargetSummary,
@@ -141,6 +142,11 @@ export function ChatView() {
 
   const pendingTasks = useMemo(() => tasks.filter((task) => task.status === "pending" && !task.later), [tasks]);
   const workItems = useMemo(() => getWorkItems(dateRangeFrom(new Date(), 365, 365)), [getWorkItems]);
+  const aiContextSource = useMemo(() => [
+    ...tasks,
+    ...getWorkItems(dateRangeFrom(new Date(), 30, 90)).filter((task) => task.generated),
+  ], [getWorkItems, tasks]);
+  const aiContext = useMemo(() => buildAiContext(aiContextSource, new Date(), 120), [aiContextSource]);
 
   function updateProposal(messageId: string, proposalId: string, update: (proposal: AiActionProposal) => AiActionProposal) {
     setMessages((current) => current.map((message) => message.id !== messageId ? message : { ...message, proposals: message.proposals?.map((proposal) => proposal.id === proposalId ? update(proposal) : proposal) }));
@@ -148,9 +154,9 @@ export function ChatView() {
 
   function approve(messageId: string, proposalIds?: string[]) {
     const message = messages.find((item) => item.id === messageId);
-    const proposals = message?.proposals?.filter((proposal) => proposal.status === "pending" && (!proposalIds || proposalIds.includes(proposal.id))) ?? [];
+    const proposals = message?.proposals?.filter((proposal) => (proposal.status === "pending" || proposal.status === "edited") && (!proposalIds || proposalIds.includes(proposal.id))) ?? [];
     if (!proposals.length) return;
-    const validation = validateAiProposals(proposals, workItems);
+    const validation = validateAiProposals(proposals, getWorkItems(dateRangeFrom(new Date(), 365, 365)));
     if (!validation.valid.length || !validation.ok) {
       setMessages((current) => current.map((item) => item.id !== messageId ? item : { ...item, proposals: item.proposals?.map((proposal) => proposals.some((candidate) => candidate.id === proposal.id) ? { ...proposal, status: "blocked", resolution: validation.issues[0] ?? "The current target no longer matches this proposal." } : proposal) }));
       return;
@@ -182,7 +188,7 @@ export function ChatView() {
     const nextMessages = [...messages, userMessage];
     setMessages(nextMessages); setInput(""); setError(null); setIsThinking(true);
     try {
-      const response = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messages: nextMessages.slice(-20).map(({ role, content }) => ({ role, content })), tasks, date: new Date().toISOString(), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }) });
+      const response = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messages: nextMessages.slice(-20).map(({ role, content }) => ({ role, content })), tasks: aiContext, date: new Date().toISOString(), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }) });
       const payload = (await response.json()) as ChatReply & { error?: string };
       if (!response.ok) throw new Error(payload.error || "Rhythm could not respond.");
       setSuggestions(payload.suggestions?.length ? payload.suggestions : prompts.slice(0, 3));
@@ -198,7 +204,7 @@ export function ChatView() {
   return <div className="chat-view" ref={root}>
     <header className="chat-header" data-chat-reveal><div><span className="section-kicker"><Sparkles size={15} /> Personal chief of staff</span><h1>Ask Rhythm</h1></div><div className="chat-header-actions">{canUndo ? <button className="soft-button" onClick={undo}><RotateCcw size={15} /> Undo last change</button> : null}<button className="soft-button" onClick={clearChat}><Plus size={16} /> New chat</button></div></header>
     <div className="chat-layout"><section className="chat-panel" data-chat-reveal><div className="chat-orb" aria-hidden="true" /><div className="chat-thread" aria-live="polite">
-      {messages.length === 0 ? <div className="chat-empty"><span className="assistant-mark"><WandSparkles size={22} /></span><p>Hello Jazz</p><h2>What can I <strong>help you</strong> with?</h2><div className="prompt-grid">{prompts.slice(0, 2).map((prompt) => <button key={prompt} onClick={() => void submitMessage(prompt)}>{prompt}<ArrowUp size={15} /></button>)}</div></div> : <div className="messages">{messages.map((message) => <article className={`message ${message.role}`} key={message.id}>{message.role === "assistant" ? <span className="message-avatar">R</span> : null}<div><p>{message.content}</p>{message.clarifications?.map((clarification) => <StatusMessage key={clarification}>{clarification}</StatusMessage>)}{message.proposals?.length ? <div className="ai-proposals">{message.proposals.length > 1 && message.proposals.some((proposal) => proposal.status === "pending") ? <div className="ai-proposals__batch"><span>Review these together as one change</span><Button type="button" variant="primary" onClick={() => approve(message.id)}>Approve all</Button></div> : null}{message.proposals.map((proposal) => <ProposalCard key={proposal.id} proposal={proposal} onApprove={() => approve(message.id, [proposal.id])} onEdit={() => edit(message.id, proposal)} onCancel={() => cancel(message.id, proposal.id)} />)}</div> : null}{message.receipt ? <div className="ai-receipt"><Check size={14} /><div><strong>Receipt</strong>{message.receipt.changed.map((item) => <span key={item}>Changed: {item}</span>)}{message.receipt.unchanged.map((item) => <span key={item}>Unchanged: {item}</span>)}{message.receipt.undoAvailable ? <span>Undo is available above.</span> : null}</div></div> : null}</div></article>)}{isThinking ? <article className="message assistant is-thinking"><span className="message-avatar">R</span><div><i /><i /><i /></div></article> : null}{error ? <div className="chat-error"><span>{error}</span><button onClick={() => void submitMessage(messages.at(-1)?.content ?? "")}>Retry <RefreshCw size={13} /></button></div> : null}<div ref={endRef} /></div>}
+      {messages.length === 0 ? <div className="chat-empty"><span className="assistant-mark"><WandSparkles size={22} /></span><p>Hello Jazz</p><h2>What can I <strong>help you</strong> with?</h2><div className="prompt-grid">{prompts.slice(0, 2).map((prompt) => <button key={prompt} onClick={() => void submitMessage(prompt)}>{prompt}<ArrowUp size={15} /></button>)}</div></div> : <div className="messages">{messages.map((message) => <article className={`message ${message.role}`} key={message.id}>{message.role === "assistant" ? <span className="message-avatar">R</span> : null}<div><p>{message.content}</p>{message.clarifications?.map((clarification) => <StatusMessage key={clarification}>{clarification}</StatusMessage>)}{message.proposals?.length ? <div className="ai-proposals">{message.proposals.length > 1 && message.proposals.some((proposal) => proposal.status === "pending" || proposal.status === "edited") ? <div className="ai-proposals__batch"><span>Review these together as one change</span><Button type="button" variant="primary" onClick={() => approve(message.id)}>Approve all</Button></div> : null}{message.proposals.map((proposal) => <ProposalCard key={proposal.id} proposal={proposal} onApprove={() => approve(message.id, [proposal.id])} onEdit={() => edit(message.id, proposal)} onCancel={() => cancel(message.id, proposal.id)} />)}</div> : null}{message.receipt ? <div className="ai-receipt"><Check size={14} /><div><strong>Receipt</strong>{message.receipt.changed.map((item) => <span key={item}>Changed: {item}</span>)}{message.receipt.unchanged.map((item) => <span key={item}>Unchanged: {item}</span>)}{message.receipt.undoAvailable ? <span>Undo is available above.</span> : null}</div></div> : null}</div></article>)}{isThinking ? <article className="message assistant is-thinking"><span className="message-avatar">R</span><div><i /><i /><i /></div></article> : null}{error ? <div className="chat-error"><span>{error}</span><button onClick={() => void submitMessage(messages.at(-1)?.content ?? "")}>Retry <RefreshCw size={13} /></button></div> : null}<div ref={endRef} /></div>}
     </div><div className="chat-composer-wrap">{messages.length > 0 ? <div className="suggestion-row">{suggestions.slice(0, 3).map((suggestion) => <button key={suggestion} onClick={() => setInput(suggestion)}>{suggestion}</button>)}</div> : null}<form className="chat-composer" onSubmit={handleSubmit}><input value={input} onChange={(event) => setInput(event.target.value)} placeholder="Ask Rhythm, or change a task…" aria-label="Message Rhythm" disabled={isThinking} maxLength={1200} /><button type="submit" aria-label="Send message" disabled={!input.trim() || isThinking}><ArrowUp size={19} /></button></form><p className="composer-note">Rhythm suggests proposals first. Nothing changes until you approve.</p></div></section>
       <aside className="context-panel" data-chat-reveal><div className="context-top"><span className="section-kicker">Today&apos;s context</span><strong>{pendingTasks.length} things left</strong></div><div className="context-task-list">{pendingTasks.slice(0, 4).map((task) => <article key={task.id}><i /><div><strong>{task.title}</strong><span>{task.project}</span></div><small>{task.dueLabel}</small></article>)}</div><div className="context-window"><Clock3 size={17} /><div><span>Open task time</span><strong>{pendingTasks.reduce((sum, task) => sum + task.estimateMinutes, 0)} minutes</strong></div></div><div className="context-note"><CornerDownRight size={16} /><p>Ask Rhythm can suggest local changes. You stay in control.</p></div></aside>
     </div>{editing ? <ProposalEditor proposal={editing.proposal} workItems={workItems} onClose={() => setEditing(null)} onSave={saveEdit} /> : null}

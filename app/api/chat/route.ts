@@ -170,10 +170,10 @@ function localReply(payload: ChatRequest) {
   }
 
   const pending = payload.tasks.filter((task) => task.status === "pending" && !task.later).sort((a, b) => ({ high: 0, medium: 1, low: 2 })[a.priority] - ({ high: 0, medium: 1, low: 2 })[b.priority]);
-  if (!pending.length) return { message: "Nothing urgent remains. You can stop for today.", suggestions, proposals: [] };
+  if (!pending.length) return { message: "The current task list has no open items marked for immediate attention.", suggestions, proposals: [] };
   const focus = pending.slice(0, 3);
   return {
-    message: `Start with “${focus[0].title}” (${focus[0].estimateMinutes} min).${focus.length > 1 ? ` Then ${focus.slice(1).map((task) => `“${task.title}”`).join(" and ")}.` : ""} Everything else can wait.`,
+    message: `Based on the current task list, start with “${focus[0].title}” (${focus[0].estimateMinutes} min).${focus.length > 1 ? ` The remaining listed tasks are lower priority in this view: ${focus.slice(1).map((task) => `“${task.title}”`).join(" and ")}.` : ""}`,
     suggestions, proposals: [],
   };
 }
@@ -184,6 +184,19 @@ function proposalKey(proposal: AiActionProposal) {
 
 function proposalFingerprint(proposal: AiActionProposal) {
   return JSON.stringify(proposal.action);
+}
+
+function uniqueProposalId(rawId: string | undefined, index: number, usedIds: Set<string>) {
+  const base = (rawId || `proposal-${index + 1}`).slice(0, 72);
+  let candidate = base;
+  let suffix = 2;
+  while (usedIds.has(candidate)) {
+    const suffixText = `-${suffix}`;
+    candidate = `${base.slice(0, 79 - suffixText.length)}${suffixText}`;
+    suffix += 1;
+  }
+  usedIds.add(candidate);
+  return candidate;
 }
 
 function titlesAreSimilar(first: string, second: string) {
@@ -200,6 +213,7 @@ function sanitizeProposalsDetailed(proposals: ProviderProposal[], tasks: Task[])
   const sanitized: AiActionProposal[] = [];
   const clarifications: string[] = [];
   const fingerprints = new Map<string, string>();
+  const usedProposalIds = new Set<string>();
 
   for (const [index, raw] of proposals.entries()) {
     if (raw.confidence < MIN_MUTATING_CONFIDENCE) {
@@ -229,7 +243,7 @@ function sanitizeProposalsDetailed(proposals: ProviderProposal[], tasks: Task[])
         ? { type: "complete_task", taskId: raw.action.taskId, title: null, project: null, dueLabel: null, estimateMinutes: null }
         : { type: "reschedule_task", taskId: raw.action.taskId, title: null, project: null, dueLabel: raw.action.dueLabel, estimateMinutes: null, ...(raw.action.dueDate ? { dueDate: raw.action.dueDate } : {}), ...(raw.action.dueTime ? { dueTime: raw.action.dueTime } : {}) };
     const proposal: AiActionProposal = {
-      id: raw.id || `proposal-${index + 1}`,
+      id: uniqueProposalId(raw.id, index, usedProposalIds),
       action,
       targetSummary: target ? taskTargetSummary(target) : `New task “${action.title}” · ${action.project} · ${action.dueLabel}`,
       confidence: raw.confidence,
