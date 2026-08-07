@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  applyAiActionProposals,
   applyAssistantActions,
   applyWorkspaceTransaction,
   addDays,
+  buildAiContext,
   clampEstimateMinutes,
   createTaskFromDraft,
   createWorkspaceState,
@@ -15,8 +17,11 @@ import {
   seedTasks,
   selectRecommendedTask,
   summarizeWorkload,
+  taskTargetSummary,
   toDateKey,
   undoWorkspace,
+  validateAiProposals,
+  type AiActionProposal,
   type RhythmWeekday,
 } from "../lib/rhythm.ts";
 
@@ -260,4 +265,72 @@ test("rhythm transaction snapshots restore occurrence state through undo", () =>
   }), "2026-08-09T10:00:00.000Z");
   assert.equal(changed.rhythmExceptions.length, 1);
   assert.equal(undoWorkspace(changed).rhythmExceptions.length, 0);
+});
+
+test("proposal validation blocks low-confidence, stale, completed, and conflicting targets", () => {
+  const target = seedTasks[0];
+  const proposal = (action: AiActionProposal["action"], confidence = 0.99): AiActionProposal => ({
+    id: crypto.randomUUID(), action, targetSummary: taskTargetSummary(target), confidence, reason: "Test provenance", status: "pending",
+  });
+  const result = validateAiProposals([
+    proposal({ type: "complete_task", taskId: "does-not-exist", title: null, project: null, dueLabel: null, estimateMinutes: null }),
+    proposal({ type: "complete_task", taskId: "review-abstract", title: null, project: null, dueLabel: null, estimateMinutes: null }),
+    proposal({ type: "complete_task", taskId: target.id, title: null, project: null, dueLabel: null, estimateMinutes: null }, 0.4),
+    proposal({ type: "complete_task", taskId: target.id, title: null, project: null, dueLabel: null, estimateMinutes: null }),
+    proposal({ type: "reschedule_task", taskId: target.id, title: null, project: null, dueLabel: "Tomorrow", estimateMinutes: null }),
+  ], seedTasks);
+  assert.equal(result.ok, false);
+  assert.equal(result.valid.length, 1);
+  assert.match(result.issues.join(" "), /current workspace|already complete|certainty|conflicting/i);
+});
+
+test("edited create and reschedule proposals revalidate and apply only after approval", () => {
+  const target = seedTasks[0];
+  const create: AiActionProposal = {
+    id: "edited-create", action: { type: "create_task", taskId: null, title: "Review portfolio", project: "Growth", dueLabel: "Tomorrow", estimateMinutes: 30 },
+    targetSummary: "New task “Review portfolio” · Growth · Tomorrow", confidence: 0.99, reason: "Edited task draft", status: "edited",
+  };
+  const reschedule: AiActionProposal = {
+    id: "edited-reschedule", action: { type: "reschedule_task", taskId: target.id, title: null, project: null, dueLabel: "Friday morning", estimateMinutes: null },
+    targetSummary: taskTargetSummary(target), confidence: 0.99, reason: "Edited destination", status: "edited",
+  };
+  const initial = createWorkspaceState([target], []);
+  const validation = validateAiProposals([create, reschedule], [target]);
+  assert.equal(validation.ok, true);
+  assert.equal(validation.valid.length, 2);
+  assert.equal(initial.tasks.length, 1);
+  const approved = applyAiActionProposals(initial, validation.valid, { createTaskId: () => "edited-create-task" });
+  assert.equal(approved.tasks.length, 2);
+  assert.equal(approved.tasks[0].id, "edited-create-task");
+  assert.equal(approved.tasks.find((task) => task.id === target.id)?.dueLabel, "Friday morning");
+});
+
+test("AI context keeps manual and relevant generated work, dedupes IDs, and strips provider references", () => {
+  const now = new Date("2026-08-09T12:00:00");
+  const manual = { ...seedTasks[0], calendarReference: "provider-secret" };
+  const generated = generateOccurrences([dailyRhythm], [], [], "2026-08-09", "2026-08-10")[0];
+  const context = buildAiContext([manual, generated, { ...manual }], now);
+  assert.deepEqual(new Set(context.map((task) => task.id)), new Set([manual.id, generated.id]));
+  assert.equal(context.some((task) => "calendarReference" in task), false);
+  assert.equal(context.find((task) => task.id === generated.id)?.generated, true);
+});
+
+test("generated occurrence proposals use occurrence semantics and one undo snapshot", () => {
+  const state = createWorkspaceState([], [dailyRhythm]);
+  const occurrence: AiActionProposal = {
+    id: "complete-occurrence", action: { type: "complete_task", taskId: "rhythm:daily-test:2026-08-09", title: null, project: null, dueLabel: null, estimateMinutes: null },
+    targetSummary: "“Read a page” · Rhythm occurrence · Today", confidence: 0.99, reason: "Exact generated occurrence", status: "pending",
+  };
+  const moved: AiActionProposal = {
+    id: "move-occurrence", action: { type: "reschedule_task", taskId: "rhythm:daily-test:2026-08-10", title: null, project: null, dueLabel: "Friday", estimateMinutes: null, dueDate: "2026-08-14" },
+    targetSummary: "“Read a page” · Rhythm occurrence · Tomorrow", confidence: 0.99, reason: "Exact generated occurrence", status: "pending",
+  };
+  const next = applyAiActionProposals(state, [occurrence, moved]);
+  assert.equal(next.tasks.length, 0);
+  assert.equal(next.rhythmCompletions[0].occurrenceDate, "2026-08-09");
+  assert.deepEqual(next.rhythmExceptions[0], { rhythmId: "daily-test", occurrenceDate: "2026-08-10", kind: "reschedule", replacementDate: "2026-08-14" });
+  assert.equal(next.history.length, 0);
+  const transaction = applyWorkspaceTransaction(state, "Approved Rhythm proposal batch", (current) => applyAiActionProposals(current, [occurrence, moved]));
+  assert.equal(transaction.history.length, 1);
+  assert.equal(undoWorkspace(transaction).rhythmCompletions.length, 0);
 });

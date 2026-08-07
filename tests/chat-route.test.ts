@@ -46,13 +46,19 @@ function request(body: unknown, headers?: HeadersInit) {
 test("uses the local assistant without a Gemini key", async () => {
   const prior = process.env.GEMINI_API_KEY;
   delete process.env.GEMINI_API_KEY;
+  const before = JSON.stringify(seedTasks);
   const response = await POST(request(payload));
   if (prior) process.env.GEMINI_API_KEY = prior;
 
   assert.equal(response.status, 200);
-  assert.deepEqual((await response.json()).actions, [
+  const result = await response.json();
+  assert.equal(result.actions, undefined);
+  assert.deepEqual(result.proposals.map((proposal: { action: unknown }) => proposal.action), [
     { type: "reschedule_task", taskId: "monday-meeting", title: null, project: null, dueLabel: "Friday", estimateMinutes: null },
   ]);
+  assert.match(result.proposals[0].targetSummary, /Prepare for Monday meeting/);
+  assert.equal(result.proposals[0].status, "pending");
+  assert.equal(JSON.stringify(seedTasks), before);
 });
 
 test("rejects malformed and oversized route payloads before provider call", async () => {
@@ -75,32 +81,34 @@ test("rejects malformed and oversized route payloads before provider call", asyn
   assert.equal(called, 0);
 });
 
-test("sanitizes invalid IDs, duplicate mutations, completed tasks, and malformed action fields", async () => {
+test("sanitizes invalid IDs, duplicate mutations, completed tasks, and malformed proposal fields", async () => {
   provider = async () => ({
     text: JSON.stringify({
-      message: "I kept only safe changes.", suggestions: [], actions: [
-        { type: "complete_task", taskId: "does-not-exist", title: null, project: null, dueLabel: null, estimateMinutes: null },
-        { type: "complete_task", taskId: "review-abstract", title: null, project: null, dueLabel: null, estimateMinutes: null },
-        { type: "reschedule_task", taskId: "monday-meeting", title: null, project: null, dueLabel: "Friday morning", estimateMinutes: null },
-        { type: "complete_task", taskId: "monday-meeting", title: null, project: null, dueLabel: null, estimateMinutes: null },
+      message: "I kept only safe changes.", suggestions: [], proposals: [
+        { id: "unknown", confidence: 0.99, reason: "Unknown target", action: { type: "complete_task", taskId: "does-not-exist", title: null, project: null, dueLabel: null, estimateMinutes: null } },
+        { id: "completed", confidence: 0.99, reason: "Completed target", action: { type: "complete_task", taskId: "review-abstract", title: null, project: null, dueLabel: null, estimateMinutes: null } },
+        { id: "move", confidence: 0.99, reason: "Exact pending target", action: { type: "reschedule_task", taskId: "monday-meeting", title: null, project: null, dueLabel: "Friday morning", estimateMinutes: null } },
+        { id: "complete", confidence: 0.99, reason: "Conflicting mutation", action: { type: "complete_task", taskId: "monday-meeting", title: null, project: null, dueLabel: null, estimateMinutes: null } },
       ],
     }),
   });
 
   const response = await POST(request(payload));
   assert.equal(response.status, 200);
-  assert.deepEqual((await response.json()).actions, [
+  const result = await response.json();
+  assert.deepEqual(result.proposals.map((proposal: { action: unknown }) => proposal.action), [
     { type: "reschedule_task", taskId: "monday-meeting", title: null, project: null, dueLabel: "Friday morning", estimateMinutes: null },
   ]);
+  assert.match(result.clarifications.join(" "), /no longer available|conflicting/i);
 });
 
-test("uses Gemini structured JSON and returns only safe task actions", async () => {
+test("uses Gemini structured JSON and returns only safe task proposals", async () => {
   process.env.GEMINI_MODEL = "test-model";
   provider = async () => ({
     text: JSON.stringify({
-      message: "Move it to Friday morning, then stop there.", suggestions: ["What can wait until Monday?"], actions: [
-        { type: "reschedule_task", taskId: "monday-meeting", title: null, project: null, dueLabel: "Friday morning", estimateMinutes: null },
-        { type: "complete_task", taskId: "unknown-task", title: null, project: null, dueLabel: null, estimateMinutes: null },
+      message: "I prepared a proposal for Friday morning.", suggestions: ["What can wait until Monday?"], proposals: [
+        { id: "move-friday", confidence: 0.96, reason: "The exact pending task and requested day were clear.", action: { type: "reschedule_task", taskId: "monday-meeting", title: null, project: null, dueLabel: "Friday morning", estimateMinutes: null } },
+        { id: "unknown", confidence: 0.96, reason: "Unknown target", action: { type: "complete_task", taskId: "unknown-task", title: null, project: null, dueLabel: null, estimateMinutes: null } },
       ],
     }),
   });
@@ -110,10 +118,46 @@ test("uses Gemini structured JSON and returns only safe task actions", async () 
   assert.equal(sent?.model, "test-model");
   assert.equal(sent?.config.responseMimeType, "application/json");
   assert.match(sent?.config.systemInstruction ?? "", /untrusted context/);
-  assert.deepEqual((await response.json()).actions, [
+  assert.deepEqual((await response.json()).proposals.map((proposal: { action: unknown }) => proposal.action), [
     { type: "reschedule_task", taskId: "monday-meeting", title: null, project: null, dueLabel: "Friday morning", estimateMinutes: null },
   ]);
   delete process.env.GEMINI_MODEL;
+});
+
+test("normalizes duplicate provider proposal IDs without changing target dedupe", async () => {
+  process.env.GEMINI_API_KEY = "test-key";
+  provider = async () => ({
+    text: JSON.stringify({
+      message: "I prepared two proposals.", suggestions: [], proposals: [
+        { id: "same-id", confidence: 0.99, reason: "Exact target", action: { type: "reschedule_task", taskId: "monday-meeting", title: null, project: null, dueLabel: "Friday", estimateMinutes: null } },
+        { id: "same-id", confidence: 0.99, reason: "Exact target", action: { type: "complete_task", taskId: "reply-casey", title: null, project: null, dueLabel: null, estimateMinutes: null } },
+      ],
+    }),
+  });
+  const response = await POST(request(payload));
+  const result = await response.json();
+  assert.equal(response.status, 200);
+  assert.deepEqual(result.proposals.map((proposal: { id: string }) => proposal.id), ["same-id", "same-id-2"]);
+});
+
+test("asks for clarification when current tasks have similarly named targets", async () => {
+  process.env.GEMINI_API_KEY = "test-key";
+  provider = async () => ({
+    text: JSON.stringify({
+      message: "I prepared a completion proposal.", suggestions: [], proposals: [
+        { id: "ambiguous", confidence: 0.99, reason: "Matched by title", action: { type: "complete_task", taskId: "same-one", title: null, project: null, dueLabel: null, estimateMinutes: null } },
+      ],
+    }),
+  });
+  const tasks = [
+    { ...seedTasks[0], id: "same-one", title: "Prepare launch notes" },
+    { ...seedTasks[0], id: "same-two", title: "Prepare launch notes" },
+  ];
+  const response = await POST(request({ ...payload, tasks }));
+  const result = await response.json();
+  assert.equal(response.status, 200);
+  assert.deepEqual(result.proposals, []);
+  assert.match(result.clarifications.join(" "), /similarly named/i);
 });
 
 test("returns calm error on Gemini provider or response failures", async () => {
@@ -122,6 +166,6 @@ test("returns calm error on Gemini provider or response failures", async () => {
 
   assert.equal(response.status, 502);
   assert.deepEqual(await response.json(), {
-    error: "Rhythm is taking a quiet moment. Please try again shortly.",
+    error: "Rhythm is taking a quiet moment. No workspace change was made; please try again shortly.",
   });
 });

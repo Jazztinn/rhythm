@@ -126,7 +126,9 @@ export type ChatMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
-  actions?: AssistantAction[];
+  proposals?: AiActionProposal[];
+  clarifications?: string[];
+  receipt?: AiProposalReceipt;
 };
 
 export type CreateTaskAction = {
@@ -136,6 +138,11 @@ export type CreateTaskAction = {
   project: string;
   dueLabel: string;
   estimateMinutes: number;
+  dueDate?: string;
+  dueTime?: string;
+  priority?: TaskPriority;
+  later?: boolean;
+  note?: string;
 };
 
 export type CompleteTaskAction = {
@@ -154,6 +161,8 @@ export type RescheduleTaskAction = {
   project: null;
   dueLabel: string;
   estimateMinutes: null;
+  dueDate?: string;
+  dueTime?: string;
 };
 
 export type AssistantAction =
@@ -164,7 +173,27 @@ export type AssistantAction =
 export type ChatReply = {
   message: string;
   suggestions: string[];
-  actions: AssistantAction[];
+  proposals: AiActionProposal[];
+  clarifications?: string[];
+};
+
+export type AiProposalStatus = "pending" | "approved" | "edited" | "cancelled" | "blocked";
+
+export type AiActionProposal = {
+  id: string;
+  action: AssistantAction;
+  targetSummary: string;
+  confidence: number;
+  reason: string;
+  status: AiProposalStatus;
+  provenance?: "local" | "gemini";
+  resolution?: string;
+};
+
+export type AiProposalReceipt = {
+  changed: string[];
+  unchanged: string[];
+  undoAvailable: boolean;
 };
 
 export type ApplyAssistantActionsOptions = {
@@ -209,6 +238,59 @@ function isDateKey(value: string) {
 
 export function dateRangeFrom(now = new Date(), daysBefore = 365, daysAfter = 365) {
   return { start: toDateKey(addDays(now, -daysBefore)), end: toDateKey(addDays(now, daysAfter)) };
+}
+
+export type AiContextTask = {
+  id: string;
+  title: string;
+  project: string;
+  dueLabel: string;
+  estimateMinutes: number;
+  status: TaskStatus;
+  priority: TaskPriority;
+  source: TaskSource;
+  later: boolean;
+  dueDate?: string;
+  dueTime?: string;
+  note?: string;
+  rhythmId?: string;
+  occurrenceDate?: string;
+  generated?: boolean;
+};
+
+/** Build the bounded, provider-safe work context used by Ask Rhythm. */
+export function buildAiContext(workItems: Task[], now = new Date(), maxItems = 120): AiContextTask[] {
+  const generatedRange = dateRangeFrom(now, 30, 90);
+  const unique = new Map<string, Task>();
+  for (const task of workItems) {
+    if (task.generated) {
+      const relevantDate = task.dueDate ?? task.occurrenceDate;
+      if (!relevantDate || relevantDate < generatedRange.start || relevantDate > generatedRange.end) continue;
+    }
+    if (!unique.has(task.id)) unique.set(task.id, task);
+  }
+  const ordered = [...unique.values()].sort((first, second) => {
+    const statusRank = Number(first.status !== "pending") - Number(second.status !== "pending");
+    const dueRank = (first.dueDate ?? first.occurrenceDate ?? "9999-12-31").localeCompare(second.dueDate ?? second.occurrenceDate ?? "9999-12-31");
+    return statusRank || dueRank || Number(first.generated) - Number(second.generated) || first.id.localeCompare(second.id);
+  });
+  return ordered.slice(0, Math.min(120, Math.max(0, maxItems))).map((task) => ({
+    id: task.id,
+    title: task.title,
+    project: task.project,
+    dueLabel: task.dueLabel,
+    estimateMinutes: task.estimateMinutes,
+    status: task.status,
+    priority: task.priority,
+    source: task.source,
+    later: task.later,
+    ...(task.dueDate ? { dueDate: task.dueDate } : {}),
+    ...(task.dueTime ? { dueTime: task.dueTime } : {}),
+    ...(task.note ? { note: task.note } : {}),
+    ...(task.rhythmId ? { rhythmId: task.rhythmId } : {}),
+    ...(task.occurrenceDate ? { occurrenceDate: task.occurrenceDate } : {}),
+    ...(task.generated ? { generated: true } : {}),
+  }));
 }
 
 export function rhythmOccurrenceId(rhythmId: string, occurrenceDate: string) {
@@ -315,8 +397,10 @@ export function resolveTaskDate(task: Task, now = new Date()) {
   if (task.dueDate) return task.dueDate;
   const label = task.dueLabel.toLowerCase();
   if (label.includes("tomorrow")) return toDateKey(addDays(now, 1));
-  if (label.includes("sunday")) {
-    const distance = (7 - now.getDay()) % 7 || 7;
+  const weekdays: Record<string, number> = { sunday: 0, monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6 };
+  const weekday = Object.entries(weekdays).find(([name]) => label.includes(name));
+  if (weekday) {
+    const distance = (weekdays[weekday[0]] - now.getDay() + 7) % 7 || 7;
     return toDateKey(addDays(now, distance));
   }
   if (label.includes("weekend")) {
@@ -786,9 +870,12 @@ export function applyAssistantActions(
         dueLabel: action.dueLabel.trim() || "Soon",
         estimateMinutes: clampEstimateMinutes(action.estimateMinutes),
         status: "pending",
-        priority: "medium",
+        priority: action.priority ?? "medium",
         source: "task",
-        later: false,
+        later: action.later ?? false,
+        ...(action.dueDate ? { dueDate: action.dueDate } : {}),
+        ...(action.dueTime ? { dueTime: action.dueTime } : {}),
+        ...(action.note ? { note: action.note.trim() } : {}),
       };
       return [task, ...current];
     }
@@ -807,10 +894,146 @@ export function applyAssistantActions(
         ? {
             ...task,
             dueLabel: action.dueLabel.trim() || task.dueLabel,
-            dueDate: undefined,
-            dueTime: undefined,
+            ...(action.dueDate ? { dueDate: action.dueDate } : { dueDate: undefined }),
+            ...(action.dueTime ? { dueTime: action.dueTime } : { dueTime: undefined }),
           }
         : task,
     );
   }, tasks);
+}
+
+export function taskTargetSummary(task: Task) {
+  const provenance = task.generated ? "Rhythm occurrence" : task.source === "calendar" ? "Calendar" : task.project;
+  return `“${task.title}” · ${provenance} · ${task.dueLabel}`;
+}
+
+export type ProposalValidation = {
+  ok: boolean;
+  issue?: string;
+  target?: Task;
+};
+
+function proposalActionFingerprint(action: AssistantAction) {
+  return JSON.stringify(action);
+}
+
+export function validateAiProposal(proposal: AiActionProposal, workItems: Task[]): ProposalValidation {
+  if (proposal.status !== "pending" && proposal.status !== "edited") return { ok: false, issue: "This proposal is no longer pending." };
+  if (!Number.isFinite(proposal.confidence) || proposal.confidence < 0.8) return { ok: false, issue: "Rhythm needs more certainty before suggesting this change." };
+
+  if (proposal.action.type === "create_task") {
+    if (proposal.action.taskId !== null || !proposal.action.title.trim() || !proposal.action.dueLabel.trim()) {
+      return { ok: false, issue: "The new task details are incomplete." };
+    }
+    return { ok: true };
+  }
+
+  const matches = workItems.filter((task) => task.id === proposal.action.taskId);
+  if (matches.length === 0) return { ok: false, issue: "That target is no longer in the current workspace range." };
+  if (matches.length > 1) return { ok: false, issue: "That target is ambiguous. Choose the exact task before approving." };
+  const target = matches[0];
+  if (target.status !== "pending") return { ok: false, issue: `“${target.title}” is already complete, so Rhythm made no change.` };
+
+  if (proposal.action.type === "complete_task") {
+    if (proposal.action.title !== null || proposal.action.project !== null || proposal.action.dueLabel !== null || proposal.action.estimateMinutes !== null) {
+      return { ok: false, issue: "The completion proposal contains extra fields." };
+    }
+  } else if (!proposal.action.dueLabel.trim()) {
+    return { ok: false, issue: "The new date needs a clear day or time." };
+  } else if (target.generated && !proposal.action.dueDate && !resolveTaskDate({
+    id: target.id,
+    title: target.title,
+    project: target.project,
+    dueLabel: proposal.action.dueLabel,
+    estimateMinutes: target.estimateMinutes,
+    status: "pending",
+    priority: target.priority,
+    source: "rhythm",
+    later: false,
+  })) {
+    return { ok: false, issue: "The generated occurrence needs a concrete destination date." };
+  }
+  return { ok: true, target };
+}
+
+export function validateAiProposals(proposals: AiActionProposal[], workItems: Task[]) {
+  const issues: string[] = [];
+  const valid: AiActionProposal[] = [];
+  const seenTargets = new Map<string, string>();
+  for (const proposal of proposals) {
+    const validation = validateAiProposal(proposal, workItems);
+    if (!validation.ok) {
+      issues.push(validation.issue ?? "This proposal could not be validated.");
+      continue;
+    }
+    const key = proposal.action.type === "create_task" ? `create:${proposal.action.title.toLocaleLowerCase()}` : proposal.action.taskId;
+    const fingerprint = proposalActionFingerprint(proposal.action);
+    const previous = seenTargets.get(key);
+    if (previous && previous !== fingerprint) {
+      issues.push(`Rhythm found conflicting changes for ${validation.target ? taskTargetSummary(validation.target) : "the new task"}. Choose one proposal.`);
+      continue;
+    }
+    if (!previous) {
+      seenTargets.set(key, fingerprint);
+      valid.push(proposal);
+    }
+  }
+  return { ok: issues.length === 0, valid, issues };
+}
+
+export function applyAiActionProposals(
+  state: WorkspaceStateV3,
+  proposals: AiActionProposal[],
+  options: ApplyAssistantActionsOptions = {},
+) {
+  const manualActions = proposals
+    .filter((proposal) => !proposal.action.taskId || !proposal.action.taskId.startsWith("rhythm:"))
+    .map((proposal) => proposal.action);
+  const nextTasks = manualActions.length ? applyAssistantActions(state.tasks, manualActions, options) : state.tasks;
+  let nextRhythmCompletions = state.rhythmCompletions;
+  let nextRhythmExceptions = state.rhythmExceptions;
+  let changed = nextTasks !== state.tasks;
+
+  for (const proposal of proposals) {
+    const { action } = proposal;
+    if (!action.taskId || !action.taskId.startsWith("rhythm:")) continue;
+    const [prefix, rhythmId, occurrenceDate] = action.taskId.split(":");
+    if (prefix !== "rhythm" || !rhythmId || !isDateKey(occurrenceDate ?? "")) continue;
+    if (action.type === "complete_task") {
+      if (!nextRhythmCompletions.some((item) => item.rhythmId === rhythmId && item.occurrenceDate === occurrenceDate)) {
+        nextRhythmCompletions = [...nextRhythmCompletions, { rhythmId, occurrenceDate, completedAt: new Date().toISOString() }];
+        changed = true;
+      }
+      const dayCompletions = state.completions[occurrenceDate] ?? [];
+      if (!dayCompletions.includes(rhythmId)) {
+        changed = true;
+        state = { ...state, completions: { ...state.completions, [occurrenceDate]: [...dayCompletions, rhythmId] } };
+      }
+    } else {
+      const replacementDate = action.dueDate || resolveTaskDate({
+        id: action.taskId,
+        title: "",
+        project: "",
+        dueLabel: action.dueLabel,
+        estimateMinutes: 5,
+        status: "pending",
+        priority: "medium",
+        source: "rhythm",
+        later: false,
+      });
+      if (!replacementDate) continue;
+      nextRhythmExceptions = [
+        ...nextRhythmExceptions.filter((item) => !(item.rhythmId === rhythmId && item.occurrenceDate === occurrenceDate)),
+        { rhythmId, occurrenceDate, kind: "reschedule", replacementDate, ...(action.dueTime ? { replacementTime: action.dueTime } : {}) },
+      ];
+      changed = true;
+    }
+  }
+  if (!changed) return state;
+  return {
+    ...state,
+    tasks: nextTasks,
+    rhythmCompletions: nextRhythmCompletions,
+    rhythmExceptions: nextRhythmExceptions,
+  };
 }
