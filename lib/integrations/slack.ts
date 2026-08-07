@@ -5,6 +5,7 @@ const SLACK_API = "https://slack.com/api";
 type FetchLike = typeof fetch;
 export type SlackChannel = { id: string; name: string; isPrivate?: boolean; isMember?: boolean };
 export type SlackMessage = { id: string; channelId: string; text: string; user?: string; timestamp: string; permalink?: string };
+type SlackApiChannel = { id: string; name: string; is_private?: boolean; is_member?: boolean };
 
 async function slackRequest<T>(token: string, method: string, body: Record<string, string> = {}, fetchImpl: FetchLike = fetch): Promise<IntegrationResponse<T>> {
   try {
@@ -34,8 +35,8 @@ export async function exchangeSlackCode(code: string, state: string, redirect: s
 }
 
 export async function listSlackChannels(token: string, cursor = "", fetchImpl: FetchLike = fetch): Promise<IntegrationResponse<{ channels: SlackChannel[]; nextCursor?: string }>> {
-  const result = await slackRequest<{ channels?: SlackChannel[]; response_metadata?: { next_cursor?: string } }>(token, "conversations.list", { types: "public_channel", exclude_archived: "true", limit: "200", ...(cursor ? { cursor } : {}) }, fetchImpl);
-  return result.data ? success({ channels: (result.data.channels ?? []).filter((channel) => !channel.isPrivate), nextCursor: result.data.response_metadata?.next_cursor || undefined }) : result as IntegrationResponse<{ channels: SlackChannel[]; nextCursor?: string }>;
+  const result = await slackRequest<{ channels?: SlackApiChannel[]; response_metadata?: { next_cursor?: string } }>(token, "conversations.list", { types: "public_channel", exclude_archived: "true", limit: "200", ...(cursor ? { cursor } : {}) }, fetchImpl);
+  return result.data ? success({ channels: (result.data.channels ?? []).filter((channel) => channel.is_private !== true && channel.is_member === true).map((channel) => ({ id: channel.id, name: channel.name, isPrivate: channel.is_private, isMember: channel.is_member })), nextCursor: result.data.response_metadata?.next_cursor || undefined }) : result as unknown as IntegrationResponse<{ channels: SlackChannel[]; nextCursor?: string }>;
 }
 
 export async function listSlackMessages(token: string, channelId: string, cursor = "", fetchImpl: FetchLike = fetch): Promise<IntegrationResponse<{ messages: SlackMessage[]; nextCursor?: string }>> {

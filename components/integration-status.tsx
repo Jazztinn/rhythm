@@ -13,7 +13,7 @@ type Connection = { status: IntegrationResponse<null>["status"]; connected: bool
 type StatusData = { google: Connection; slack: Connection };
 
 export function IntegrationStatusBadge({ status }: { status: Connection["status"] }) {
-  const labels: Record<Connection["status"], string> = { connected: "Connected", not_configured: "Not configured", not_connected: "Not connected", permission_denied: "Permission needed", token_expired: "Reconnect needed", rate_limited: "Rate limited", offline: "Offline", provider_unavailable: "Unavailable" };
+  const labels: Record<Connection["status"], string> = { connected: "Connected", not_configured: "Not configured", not_connected: "Not connected", permission_denied: "Permission needed", token_expired: "Reconnect needed", rate_limited: "Rate limited", offline: "Offline", provider_unavailable: "Unavailable", invalid_request: "Check details" };
   return <span className={`integration-status integration-status--${status}`}>{labels[status]}</span>;
 }
 

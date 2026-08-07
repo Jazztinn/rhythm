@@ -9,15 +9,25 @@ export const integrationStatuses = [
   "provider_unavailable",
 ] as const;
 
-export type IntegrationStatus = (typeof integrationStatuses)[number];
-export type ProviderErrorCode = Exclude<IntegrationStatus, "connected">;
+export type ProviderErrorCode = Exclude<(typeof integrationStatuses)[number], "connected">;
+export type IntegrationRequestErrorCode = "invalid_request";
+export type IntegrationErrorCode = ProviderErrorCode | IntegrationRequestErrorCode;
+export type IntegrationStatus = ProviderErrorCode | "connected" | IntegrationRequestErrorCode;
 export type IntegrationProvider = "google" | "slack";
 
-export type IntegrationError = {
+export type ProviderError = {
   code: ProviderErrorCode;
   message: string;
   retryable: boolean;
 };
+
+export type IntegrationRequestError = {
+  code: IntegrationRequestErrorCode;
+  message: string;
+  retryable: false;
+};
+
+export type IntegrationError = ProviderError | IntegrationRequestError;
 
 export type IntegrationResponse<T> = {
   status: IntegrationStatus;
@@ -31,6 +41,10 @@ export function success<T>(data: T, status: IntegrationStatus = "connected"): In
 
 export function failure<T = never>(code: ProviderErrorCode, message: string, retryable = false): IntegrationResponse<T> {
   return { status: code, data: null, error: { code, message, retryable } };
+}
+
+export function requestFailure<T = never>(code: IntegrationRequestErrorCode, message: string): IntegrationResponse<T> {
+  return { status: code, data: null, error: { code, message, retryable: false } };
 }
 
 export function classifyProviderResponse(status: number): ProviderErrorCode {

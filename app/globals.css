@@ -1895,10 +1895,12 @@ a.nav-item:active,
 .provider-event, .slack-message-list article { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3) var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: rgba(255,255,255,.46); }
 .provider-event.is-external { border-left: 3px solid #b9c2b2; }
 .provider-event.is-managed { border-left: 3px solid var(--color-accent); }
+.provider-event.has-conflict { background: #fff8e8; border-color: #e6c785; }
 .provider-event span, .provider-event strong, .provider-event small { display: block; }
 .provider-event span { color: var(--color-text-subtle); font-size: 9px; text-transform: uppercase; letter-spacing: .06em; }
 .provider-event strong { margin-top: 3px; font-size: 12px; font-weight: 580; }
 .provider-event small { margin-top: 4px; color: var(--color-text-muted); font-size: 10px; }
+.provider-conflict { margin: 6px 0 0; color: #885b1f; font-size: 10px; font-weight: 650; }
 .provider-event a { color: var(--color-accent); font-size: 11px; }
 .provider-event__actions { display: flex; align-items: center; gap: 6px; }
 .provider-event__actions .ui-button { min-height: 34px; padding-inline: 10px; font-size: 10px; }

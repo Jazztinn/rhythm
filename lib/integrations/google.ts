@@ -1,5 +1,6 @@
 import { classifyProviderError, classifyProviderResponse, failure, success, type IntegrationResponse } from "./contracts.ts";
 import type { ProviderSession } from "./session.ts";
+import { validateManagedEventPayload, type ValidManagedEvent, type ValidManagedPatch } from "./validation.ts";
 
 const GOOGLE_API = "https://www.googleapis.com/calendar/v3";
 const GOOGLE_TOKEN = "https://oauth2.googleapis.com/token";
@@ -20,7 +21,8 @@ async function request<T>(token: string, path: string, init: RequestInit = {}, f
       const code = classifyProviderResponse(response.status);
       return failure(code, `Google Calendar returned ${response.status}.`, code === "rate_limited" || code === "provider_unavailable");
     }
-    return success(await response.json() as T);
+    const text = await response.text();
+    return success(text.trim() ? JSON.parse(text) as T : undefined as T);
   } catch (error) { return errorResponse<T>(error); }
 }
 
@@ -70,7 +72,7 @@ export async function listGoogleEvents(token: string, calendarIds: string[], tim
   } catch (error) { return errorResponse<GoogleEvent[]>(error); }
 }
 
-type ManagedEventInput = { calendarId: string; taskReference: string; summary: string; description?: string; start: string; end: string };
+type ManagedEventInput = ValidManagedEvent;
 
 async function verifyManagedEvent(token: string, calendarId: string, eventId: string, fetchImpl: FetchLike): Promise<IntegrationResponse<boolean>> {
   const result = await request<{ extendedProperties?: { private?: Record<string, string> } }>(token, `/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`, {}, fetchImpl);
@@ -79,11 +81,17 @@ async function verifyManagedEvent(token: string, calendarId: string, eventId: st
 }
 
 export async function createManagedGoogleEvent(token: string, input: ManagedEventInput, fetchImpl: FetchLike = fetch): Promise<IntegrationResponse<GoogleEvent>> {
+  const valid = validateManagedEventPayload(input, "create");
+  if (valid.error) return valid as unknown as IntegrationResponse<GoogleEvent>;
+  input = valid.data as ValidManagedEvent;
   const result = await request<{ id: string; summary?: string; start?: { dateTime?: string }; end?: { dateTime?: string }; extendedProperties?: { private?: Record<string, string> } }>(token, `/calendars/${encodeURIComponent(input.calendarId)}/events`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ summary: input.summary, description: input.description, start: { dateTime: input.start }, end: { dateTime: input.end }, extendedProperties: { private: { rhythmManaged: "true", rhythmTaskReference: input.taskReference } } }) }, fetchImpl);
   return result.data ? success({ id: result.data.id, calendarId: input.calendarId, summary: result.data.summary ?? input.summary, description: input.description, start: result.data.start?.dateTime ?? input.start, end: result.data.end?.dateTime ?? input.end, rhythmManaged: true, taskReference: input.taskReference }) : result as IntegrationResponse<GoogleEvent>;
 }
 
 export async function updateManagedGoogleEvent(token: string, calendarId: string, eventId: string, input: Partial<Omit<ManagedEventInput, "calendarId">>, fetchImpl: FetchLike = fetch): Promise<IntegrationResponse<GoogleEvent>> {
+  const valid = validateManagedEventPayload({ calendarId, ...input }, "update");
+  if (valid.error) return valid as unknown as IntegrationResponse<GoogleEvent>;
+  input = valid.data as ValidManagedPatch;
   const verified = await verifyManagedEvent(token, calendarId, eventId, fetchImpl);
   if (verified.error) return verified as unknown as IntegrationResponse<GoogleEvent>;
   const result = await request<{ id: string; summary?: string; start?: { dateTime?: string }; end?: { dateTime?: string }; extendedProperties?: { private?: Record<string, string> } }>(token, `/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ summary: input.summary, description: input.description, start: input.start ? { dateTime: input.start } : undefined, end: input.end ? { dateTime: input.end } : undefined }) }, fetchImpl);
