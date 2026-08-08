@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { applyAssistantActions, seedTasks } from "../lib/rhythm.ts";
+import { applyAssistantActions, clampEstimateMinutes, seedTasks } from "../lib/rhythm.ts";
 
 test("completes a known task", () => {
   const next = applyAssistantActions(seedTasks, [
@@ -58,9 +58,16 @@ test("creates a bounded local task", () => {
       dueLabel: "Tonight",
       estimateMinutes: 30,
     },
-  ]);
+  ], { createTaskId: () => "task-test-id" });
 
   assert.equal(next.length, seedTasks.length + 1);
+  assert.equal(next[0].id, "task-test-id");
   assert.equal(next[0].title, "Review portfolio");
   assert.equal(next[0].status, "pending");
+});
+
+test("clamps local estimates deterministically", () => {
+  assert.equal(clampEstimateMinutes(1), 5);
+  assert.equal(clampEstimateMinutes(30), 30);
+  assert.equal(clampEstimateMinutes(900), 480);
 });

@@ -60,6 +60,18 @@ export type ChatReply = {
   actions: AssistantAction[];
 };
 
+export type ApplyAssistantActionsOptions = {
+  createTaskId?: () => string;
+};
+
+export function clampEstimateMinutes(value: number) {
+  return Math.min(Math.max(value, 5), 480);
+}
+
+export function createLocalTaskId() {
+  return `task-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
 export const seedTasks: Task[] = [
   {
     id: "techforgood-mockups",
@@ -145,15 +157,17 @@ export const seedTasks: Task[] = [
 export function applyAssistantActions(
   tasks: Task[],
   actions: AssistantAction[],
+  options: ApplyAssistantActionsOptions = {},
 ): Task[] {
+  const createTaskId = options.createTaskId ?? createLocalTaskId;
   return actions.reduce((current, action) => {
     if (action.type === "create_task") {
       const task: Task = {
-        id: `task-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        id: createTaskId(),
         title: action.title.trim(),
         project: action.project.trim() || "Personal",
         dueLabel: action.dueLabel.trim() || "Soon",
-        estimateMinutes: Math.min(Math.max(action.estimateMinutes, 5), 480),
+        estimateMinutes: clampEstimateMinutes(action.estimateMinutes),
         status: "pending",
         priority: "medium",
         source: "task",

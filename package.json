@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --test tests/*.test.ts"
+    "test": "node --experimental-test-module-mocks --test --test-concurrency=1 tests/*.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.16.0",
