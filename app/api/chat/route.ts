@@ -136,15 +136,21 @@ export async function POST(request: Request) {
 
   try {
     const client = new GoogleGenAI({ apiKey });
-    const response = await client.interactions.create({
+    const response = await client.models.generateContent({
       model: process.env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODEL,
-      input: payload.messages.map((message) => ({ role: message.role === "assistant" ? "model" : "user", content: message.content })),
-      system_instruction: systemInstructions(payload),
-      response_format: { type: "text", mime_type: "application/json", schema: ReplyJsonSchema },
-      generation_config: { max_output_tokens: 1200 },
+      contents: payload.messages.map((message) => ({
+        role: message.role === "assistant" ? "model" : "user",
+        parts: [{ text: message.content }],
+      })),
+      config: {
+        systemInstruction: systemInstructions(payload),
+        responseMimeType: "application/json",
+        responseJsonSchema: ReplyJsonSchema,
+        maxOutputTokens: 1200,
+      },
     });
-    if (!response.output_text) return Response.json({ error: "Rhythm paused before answering. Try that once more." }, { status: 502 });
-    const reply = ReplySchema.safeParse(JSON.parse(response.output_text));
+    if (!response.text) return Response.json({ error: "Rhythm paused before answering. Try that once more." }, { status: 502 });
+    const reply = ReplySchema.safeParse(JSON.parse(response.text));
     if (!reply.success) throw new Error("Malformed Gemini response");
     return Response.json({ message: reply.data.message, suggestions: reply.data.suggestions, actions: sanitizeActions(reply.data.actions, payload.tasks) });
   } catch (error) {

@@ -4,18 +4,20 @@ import { seedTasks } from "../lib/rhythm.ts";
 
 type GeminiRequest = {
   model: string;
-  system_instruction: string;
-  response_format: { type: string; mime_type: string };
+  config: {
+    systemInstruction: string;
+    responseMimeType: string;
+  };
 };
 
 let sent: GeminiRequest | undefined;
-let provider: () => Promise<{ output_text?: string | null }> = async () => ({ output_text: "{}" });
+let provider: () => Promise<{ text?: string | null }> = async () => ({ text: "{}" });
 
 await mock.module("@google/genai", {
   namedExports: {
     GoogleGenAI: class {
-      interactions = {
-        create: async (input: GeminiRequest) => {
+      models = {
+        generateContent: async (input: GeminiRequest) => {
           sent = input;
           return provider();
         },
@@ -58,7 +60,7 @@ test("rejects malformed and oversized route payloads before provider call", asyn
   let called = 0;
   provider = async () => {
     called += 1;
-    return { output_text: "{}" };
+    return { text: "{}" };
   };
 
   const malformed = await POST(request("not json"));
@@ -75,7 +77,7 @@ test("rejects malformed and oversized route payloads before provider call", asyn
 
 test("sanitizes invalid IDs, duplicate mutations, completed tasks, and malformed action fields", async () => {
   provider = async () => ({
-    output_text: JSON.stringify({
+    text: JSON.stringify({
       message: "I kept only safe changes.", suggestions: [], actions: [
         { type: "complete_task", taskId: "does-not-exist", title: null, project: null, dueLabel: null, estimateMinutes: null },
         { type: "complete_task", taskId: "review-abstract", title: null, project: null, dueLabel: null, estimateMinutes: null },
@@ -95,7 +97,7 @@ test("sanitizes invalid IDs, duplicate mutations, completed tasks, and malformed
 test("uses Gemini structured JSON and returns only safe task actions", async () => {
   process.env.GEMINI_MODEL = "test-model";
   provider = async () => ({
-    output_text: JSON.stringify({
+    text: JSON.stringify({
       message: "Move it to Friday morning, then stop there.", suggestions: ["What can wait until Monday?"], actions: [
         { type: "reschedule_task", taskId: "monday-meeting", title: null, project: null, dueLabel: "Friday morning", estimateMinutes: null },
         { type: "complete_task", taskId: "unknown-task", title: null, project: null, dueLabel: null, estimateMinutes: null },
@@ -106,8 +108,8 @@ test("uses Gemini structured JSON and returns only safe task actions", async () 
   const response = await POST(request(payload));
   assert.equal(response.status, 200);
   assert.equal(sent?.model, "test-model");
-  assert.equal(sent?.response_format.mime_type, "application/json");
-  assert.match(sent?.system_instruction ?? "", /untrusted context/);
+  assert.equal(sent?.config.responseMimeType, "application/json");
+  assert.match(sent?.config.systemInstruction ?? "", /untrusted context/);
   assert.deepEqual((await response.json()).actions, [
     { type: "reschedule_task", taskId: "monday-meeting", title: null, project: null, dueLabel: "Friday morning", estimateMinutes: null },
   ]);
