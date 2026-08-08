@@ -14,9 +14,9 @@ import {
 const navigation = [
   { label: "Today", href: "/", icon: CheckSquare2, enabled: true },
   { label: "Chat", href: "/chat", icon: MessageCircleMore, enabled: true },
-  { label: "Tasks", href: "/tasks", icon: Sparkles, enabled: false },
-  { label: "Calendar", href: "/calendar", icon: CalendarDays, enabled: false },
-  { label: "Rhythms", href: "/rhythms", icon: Orbit, enabled: false },
+  { label: "Tasks", href: "/tasks", icon: Sparkles, enabled: true },
+  { label: "Calendar", href: "/calendar", icon: CalendarDays, enabled: true },
+  { label: "Rhythms", href: "/rhythms", icon: Orbit, enabled: true },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
