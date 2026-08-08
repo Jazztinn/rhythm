@@ -55,6 +55,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 key={item.label}
                 href={item.href}
                 className={`nav-item ${active ? "is-active" : ""}`}
+                aria-current={active ? "page" : undefined}
               >
                 <Icon size={19} strokeWidth={1.7} />
                 <span>{item.label}</span>

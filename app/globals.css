@@ -23,8 +23,8 @@ html {
 
 body {
   margin: 0;
-  min-width: 1100px;
   min-height: 100vh;
+  overflow-x: hidden;
   background:
     radial-gradient(circle at 86% 4%, rgba(214, 227, 205, 0.6), transparent 28%),
     var(--canvas);
@@ -139,6 +139,18 @@ input:focus-visible {
   text-decoration: none;
   font-size: 14px;
   transition: background 180ms ease, color 180ms ease, transform 180ms ease;
+}
+
+.nav-item,
+.icon-button,
+.profile-button,
+.soft-button,
+.task-check,
+.later-toggle,
+.prompt-grid button,
+.suggestion-row button,
+.chat-error button {
+  min-height: 44px;
 }
 
 a.nav-item:hover {
@@ -1253,6 +1265,101 @@ a.nav-item:hover {
   .today-view, .chat-view { padding-left: 32px; padding-right: 32px; }
   .day-card { min-height: 390px; }
   .ai-nudge { width: 52%; }
+}
+
+@media (max-width: 1099px) {
+  .sidebar { width: 88px; padding: 22px 12px 18px; }
+  .app-content { margin-left: 88px; }
+  .brand { justify-content: center; padding: 0; }
+  .brand-name, .nav-item > span, .nav-item i, .sidebar-bottom .icon-button { display: none; }
+  .nav-stack { margin-top: 50px; }
+  .nav-item { justify-content: center; padding: 0; }
+  .nav-item.is-active::before { left: -12px; }
+  .sidebar-bottom { justify-content: center; padding: 0; }
+  .today-view, .chat-view { padding: 34px 28px 48px; }
+  .hero-grid, .content-grid { grid-template-columns: 1fr; }
+  .window-card { min-height: 0; }
+  .chat-layout { grid-template-columns: minmax(0, 1fr) 270px; }
+}
+
+@media (max-width: 767px) {
+  :root { --radius-lg: 27px; --radius-md: 22px; }
+  body { min-width: 0; }
+  .app-content { margin-left: 0; padding-top: 74px; }
+  .sidebar {
+    inset: 0 0 auto;
+    width: 100%;
+    height: 74px;
+    flex-direction: row;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 16px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .brand { flex: 0 0 auto; }
+  .nav-stack { min-width: 0; flex: 1; flex-direction: row; gap: 5px; margin: 0; overflow-x: auto; scrollbar-width: none; }
+  .nav-stack::-webkit-scrollbar { display: none; }
+  .nav-item { flex: 0 0 auto; width: auto; padding: 0 12px; }
+  .nav-item > span { display: inline; }
+  .nav-item.is-disabled { display: none; }
+  .nav-item.is-active::before { left: 50%; top: auto; bottom: -12px; width: 18px; height: 3px; transform: translateX(-50%); }
+  .sidebar-bottom { margin: 0; flex: 0 0 auto; }
+  .sidebar-bottom .icon-button { display: none; }
+  .today-view, .chat-view { padding: 28px 16px 36px; }
+  .page-header, .chat-header { display: block; margin-bottom: 25px; }
+  .page-header h1, .chat-header h1 { font-size: clamp(43px, 14vw, 58px); }
+  .page-subtitle { max-width: 300px; font-size: 14px; line-height: 1.45; }
+  .header-actions, .chat-header-actions { justify-content: space-between; margin-top: 20px; }
+  .weather, .soft-button { min-height: 44px; }
+  .hero-grid { gap: 12px; }
+  .day-card { min-height: 445px; padding: 22px 20px; border-radius: 29px; }
+  .day-score { align-items: flex-start; flex-direction: column; gap: 13px; margin: 44px 0 25px; }
+  .day-score .dot-number { gap: 9px; }
+  .day-score .dot-digit { width: 43px; grid-template-columns: repeat(3, 8px); gap: 5px 8px; }
+  .day-score .dot-digit i { width: 8px; height: 8px; }
+  .day-score strong { font-size: 24px; }
+  .ai-nudge { right: 15px; bottom: 15px; width: calc(100% - 30px); min-height: 72px; border-radius: 21px; }
+  .window-card { padding: 22px 20px; border-radius: 29px; }
+  .window-time { margin: 25px 0 18px; }
+  .content-grid { margin-top: 25px; gap: 25px; }
+  .section-heading { align-items: flex-start; }
+  .section-heading h2 { font-size: 21px; }
+  .task-card { grid-template-columns: 42px minmax(0, 1fr); min-height: 88px; padding: 13px 12px; gap: 10px; border-radius: 21px; }
+  .task-check { width: 42px; height: 42px; }
+  .task-copy h3 { font-size: 13px; line-height: 1.3; }
+  .task-copy p { line-height: 1.35; }
+  .task-meta { grid-column: 2; min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; text-align: left; }
+  .task-meta strong { margin: 0; }
+  .task-meta span { justify-content: flex-start; }
+  .week-card { padding: 21px 19px; border-radius: 29px; }
+  .week-bars { height: 145px; margin-top: 21px; }
+  .week-bars > div > span { height: 105px; }
+  .chat-view { height: calc(100svh - 74px); min-height: 600px; padding-bottom: 16px; }
+  .chat-header { flex: 0 0 auto; }
+  .chat-header-actions { margin-top: 14px; }
+  .chat-layout { min-height: 0; display: flex; flex: 1; flex-direction: column; gap: 12px; }
+  .chat-panel { min-height: 0; flex: 1; border-radius: 29px; }
+  .chat-thread { padding: 24px 16px 10px; }
+  .chat-empty { padding: 12px 0 8px; }
+  .assistant-mark { margin-bottom: 19px; }
+  .chat-empty > p { font-size: 26px; }
+  .chat-empty h2 { font-size: clamp(42px, 13vw, 61px); }
+  .prompt-grid { grid-template-columns: 1fr; margin-top: 27px; }
+  .prompt-grid button { min-height: 54px; }
+  .message > div { max-width: 88%; }
+  .chat-composer-wrap { padding: 8px 12px 15px; }
+  .suggestion-row { justify-content: flex-start; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
+  .suggestion-row::-webkit-scrollbar { display: none; }
+  .suggestion-row button { flex: 0 0 auto; max-width: 70%; min-height: 38px; }
+  .chat-composer { min-height: 58px; height: auto; padding-left: 15px; border-radius: 20px; }
+  .chat-composer input { font-size: 16px; }
+  .chat-composer button { flex: 0 0 44px; width: 44px; height: 44px; }
+  .composer-note { line-height: 1.35; }
+  .context-panel { flex: 0 0 auto; max-height: 116px; padding: 16px; border-radius: 23px; }
+  .context-top { display: flex; align-items: center; justify-content: space-between; padding: 0; border: 0; }
+  .context-top strong { margin: 0; font-size: 18px; }
+  .context-task-list, .context-window, .context-note { display: none; }
 }
 
 @media print {
