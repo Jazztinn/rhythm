@@ -8,6 +8,7 @@ import {
   createLearningState,
   editPattern,
   inferPattern,
+  inferBehaviorPatterns,
   migrateLearningState,
   removePattern,
   seedLearningState,
@@ -95,4 +96,17 @@ test("seed observations are visibly still learning, never hidden defaults", () =
   assert.ok(seedLearningState.patterns.length > 0);
   assert.ok(seedLearningState.patterns.every((pattern) => pattern.status === "still-learning"));
   assert.equal(confirmedPatterns(seedLearningState).length, 0);
+});
+
+test("actual task and Rhythm completion history becomes unconfirmed questions", () => {
+  const completions = ["2026-08-01T19:00:00.000Z", "2026-08-02T20:00:00.000Z", "2026-08-03T21:00:00.000Z"];
+  const result = inferBehaviorPatterns({
+    tasks: completions.map((completedAt, index) => ({ id: `t-${index}`, title: `Admin ${index}`, project: "Admin", dueLabel: "Done", estimateMinutes: 20, status: "completed" as const, priority: "low" as const, source: "task" as const, later: false, completedAt })),
+    rhythms: [{ id: "review", title: "Weekly Review", note: "Review", schedule: { frequency: "weekly" as const, weekdays: [0] }, startsOn: "2026-08-01", icon: "orbit" as const, tone: "violet" as const }],
+    rhythmCompletions: completions.map((completedAt, index) => ({ rhythmId: "review", occurrenceDate: `2026-08-0${index + 1}`, completedAt })),
+  });
+  assert.equal(result.length, 2);
+  const state = result.reduce(addInference, createLearningState());
+  assert.ok(state.patterns.every((pattern) => pattern.status === "still-learning"));
+  assert.equal(confirmedPatterns(state).length, 0);
 });

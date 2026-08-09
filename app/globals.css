@@ -2280,6 +2280,15 @@ summary:focus-visible {
 .embedded-assist .section-kicker { flex: 0 0 auto; margin: 0; color: #62538d; font-size: 11px; }
 .embedded-assist > span:nth-child(2) { min-width: 0; }
 .embedded-assist a { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; flex: 0 0 auto; color: #62538d; font-weight: 650; text-decoration: none; }
+.routine-context { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-4); margin: 0 0 var(--space-5); padding: var(--space-4) var(--space-5); border: 1px solid rgba(104, 89, 148, .16); border-radius: var(--radius-lg); background: linear-gradient(135deg, rgba(244, 241, 252, .76), rgba(250, 250, 246, .72)); box-shadow: var(--shadow-sm); animation: routine-insight-in 220ms var(--ease-out) both; }
+.routine-context.is-confirmed { border-color: rgba(67, 126, 47, .16); background: linear-gradient(135deg, rgba(236, 249, 225, .72), rgba(250, 250, 246, .72)); }
+.routine-context .section-kicker { margin: 0; }
+.routine-context strong, .routine-context span { display: block; }
+.routine-context strong { font-size: 14px; font-weight: 580; }
+.routine-context div > span { margin-top: 3px; color: var(--color-text-muted); font-size: 12px; }
+.routine-context p { margin: 5px 0 0; color: var(--color-text-muted); font-size: 11px; line-height: 1.5; }
+.routine-context > a { display: inline-flex; align-items: center; gap: 5px; color: #62538d; font-size: 12px; font-weight: 650; text-decoration: none; }
+@keyframes routine-insight-in { from { opacity: 0; filter: blur(3px); transform: translateY(6px); } }
 .inventory-notice,
 .timezone-notice { margin: var(--space-4) 0 0; }
 .inventory-notice { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3) var(--space-4); border: 1px solid #d8c18e; border-radius: var(--radius-sm); background: #fff8e8; color: #76591f; font-size: 12px; }
@@ -2329,11 +2338,19 @@ summary:focus-visible {
   .nav-item.is-active > span { display: none; }
   .nav-item.is-active::before { bottom: -6px; }
   .calendar-panel { display: none; }
+  .calendar-workspace { display: flex; flex-direction: column; }
+  .calendar-workspace > .workspace-header { order: 0; }
+  .calendar-workspace > .calendar-agenda-mobile { order: 1; }
+  .calendar-workspace > .calendar-summary { order: 2; }
+  .calendar-workspace > .provider-calendar-panel { order: 3; }
+  .calendar-workspace > .calendar-task-strip { order: 4; }
   .calendar-agenda-mobile { display: block; }
   .calendar-agenda-mobile .section-heading { margin-bottom: var(--space-4); }
   .embedded-assist { align-items: flex-start; flex-wrap: wrap; }
   .embedded-assist > span:nth-child(2) { flex: 1 1 180px; }
   .embedded-assist a { margin-left: auto; }
+  .routine-context { grid-template-columns: 1fr; padding: var(--space-4); }
+  .routine-context > a { justify-self: start; min-height: 44px; align-items: center; }
   .inventory-notice { align-items: flex-start; flex-direction: column; }
 }
 
@@ -2354,6 +2371,21 @@ summary:focus-visible {
   }
   .task-card.is-exiting,
   .full-task-row.is-exiting { opacity: .5; max-height: none; transform: none; }
+}
+
+html[data-reduce-motion="true"] *,
+html[data-reduce-motion="true"] *::before,
+html[data-reduce-motion="true"] *::after {
+  animation: none !important;
+  transition: none !important;
+  scroll-behavior: auto !important;
+}
+
+html[data-higher-contrast="true"] {
+  --color-text-muted: #41473e;
+  --color-text-subtle: #50574d;
+  --color-border: rgba(24, 27, 22, .24);
+  --line: rgba(24, 27, 22, .22);
 }
 
 /* Final supporting-type floor: keep visible secondary UI readable without

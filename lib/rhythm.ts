@@ -26,6 +26,7 @@ export type Task = {
   dueDate?: string;
   dueTime?: string;
   note?: string;
+  completedAt?: string;
   rhythmId?: string;
   occurrenceDate?: string;
   generated?: boolean;
@@ -730,7 +731,8 @@ export function isTask(value: unknown): value is Task {
   return typeof value.project === "string" && typeof value.dueLabel === "string" &&
     (value.status === "pending" || value.status === "completed") &&
     (value.priority === "low" || value.priority === "medium" || value.priority === "high") &&
-    typeof value.estimateMinutes === "number";
+    typeof value.estimateMinutes === "number" &&
+    (value.completedAt === undefined || typeof value.completedAt === "string");
 }
 
 export function isRhythmDefinition(value: unknown): value is RhythmDefinition {

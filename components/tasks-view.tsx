@@ -39,7 +39,7 @@ export function TasksView() {
   const [exitingIds, setExitingIds] = useState<Set<string>>(new Set());
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const today = toDateKey(new Date());
-  const workItems = useMemo(() => getWorkItems(dateRangeFrom(new Date(), 90, 45)), [getWorkItems]);
+  const workItems = useMemo(() => getWorkItems(dateRangeFrom(new Date(), 90, 14)), [getWorkItems]);
   const projects = useMemo(() => [...new Set(workItems.map((task) => task.project).filter(Boolean))].sort(), [workItems]);
 
   useEffect(() => {
@@ -52,7 +52,7 @@ export function TasksView() {
     return () => window.clearTimeout(timer);
   }, [hydrated, workItems]);
 
-  const inventory = useMemo(() => selectTaskInventory(workItems, new Date(), 30), [workItems]);
+  const inventory = useMemo(() => selectTaskInventory(workItems, new Date(), 14), [workItems]);
   const openTasks = useMemo(() => inventory.visible.filter((task) => task.status === "pending"), [inventory.visible]);
   const completedTasks = useMemo(() => inventory.visible.filter((task) => task.status === "completed"), [inventory.visible]);
   const inventoryTasks = useMemo(() => {

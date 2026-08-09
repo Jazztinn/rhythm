@@ -163,7 +163,10 @@ export function RhythmProvider({ children }: { children: React.ReactNode }) {
   const toggleTask = useCallback((id: string) => {
     commitTransaction("Updated task completion", (current) => ({
       ...current,
-      tasks: current.tasks.map((task) => task.id === id ? { ...task, status: task.status === "completed" ? "pending" : "completed" } : task),
+      tasks: current.tasks.map((task) => task.id === id ? task.status === "completed"
+        ? { ...task, status: "pending", completedAt: undefined }
+        : { ...task, status: "completed", completedAt: new Date().toISOString() }
+        : task),
     }));
   }, [commitTransaction]);
 

@@ -5,8 +5,10 @@ import { Bell, Brain, Clock3, Download, Eye, Shield, UserRound } from "lucide-re
 import { Button, ConfirmAction, StatusMessage } from "@/components/ui";
 import {
   LEARNING_STORAGE_KEY,
+  addInference,
   answerPattern,
   editPattern,
+  inferBehaviorPatterns,
   migrateLearningState,
   removePattern,
   seedLearningState,
@@ -16,6 +18,7 @@ import {
   type LearningState,
   type LearningStatus,
 } from "@/lib/learning";
+import { useRhythm } from "@/components/rhythm-provider";
 
 const PREFERENCES_STORAGE_KEY = "rhythm.preferences.v1";
 
@@ -118,6 +121,7 @@ function SettingsSection({ icon, title, description, children }: { icon: ReactNo
 }
 
 export function RoutineLearningSettings({ connections }: { connections: ReactNode }) {
+  const { tasks, rhythms, rhythmCompletions, hydrated: workspaceHydrated } = useRhythm();
   const [learning, setLearning] = useState<LearningState>(seedLearningState);
   const [preferences, setPreferences] = useState<Preferences>(defaultPreferences);
   const [hydrated, setHydrated] = useState(false);
@@ -143,13 +147,23 @@ export function RoutineLearningSettings({ connections }: { connections: ReactNod
 
   useEffect(() => {
     if (!hydrated) return;
+    document.documentElement.dataset.reduceMotion = String(preferences.reducedMotion);
+    document.documentElement.dataset.higherContrast = String(preferences.higherContrast);
     try {
       window.localStorage.setItem(LEARNING_STORAGE_KEY, JSON.stringify(learning));
       window.localStorage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify(preferences));
     } catch {
-      setStorageNotice("Changes are available for this visit, but this browser blocked local saving.");
+      window.setTimeout(() => setStorageNotice("Changes are available for this visit, but this browser blocked local saving."), 0);
     }
   }, [hydrated, learning, preferences]);
+
+  useEffect(() => {
+    if (!hydrated || !workspaceHydrated) return;
+    const observations = inferBehaviorPatterns({ tasks, rhythms, rhythmCompletions });
+    if (!observations.length) return;
+    const timer = window.setTimeout(() => setLearning((current) => observations.reduce(addInference, current)), 0);
+    return () => window.clearTimeout(timer);
+  }, [hydrated, rhythmCompletions, rhythms, tasks, workspaceHydrated]);
 
   const categories = useMemo(() => [...new Set(learning.patterns.filter((pattern) => pattern.status !== "rejected").map((pattern) => pattern.category))], [learning.patterns]);
   const visiblePatterns = learning.patterns.filter((pattern) => pattern.status !== "rejected");

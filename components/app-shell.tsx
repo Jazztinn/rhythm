@@ -22,7 +22,7 @@ function SearchDialog({ open, onClose, onOpenTask }: { open: boolean; onClose: (
   const { getWorkItems, completeOccurrence, uncompleteOccurrence } = useRhythm();
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
-  const results = useMemo(() => searchTasks(getWorkItems(dateRangeFrom(new Date(), 90, 45)), query), [getWorkItems, query]);
+  const results = useMemo(() => searchTasks(getWorkItems(dateRangeFrom(new Date(), 30, 14)), query), [getWorkItems, query]);
   const safeActiveIndex = Math.min(activeIndex, Math.max(results.length - 1, 0));
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
@@ -96,6 +96,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const completed = tasks.filter((task) => task.status === "completed").length;
 
   useEffect(() => {
+    try {
+      const preferences = JSON.parse(window.localStorage.getItem("rhythm.preferences.v1") ?? "{}");
+      document.documentElement.dataset.reduceMotion = String(preferences.reducedMotion === true);
+      document.documentElement.dataset.higherContrast = String(preferences.higherContrast === true);
+    } catch {
+      document.documentElement.dataset.reduceMotion = "false";
+      document.documentElement.dataset.higherContrast = "false";
+    }
     function handleKey(event: KeyboardEvent) {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();

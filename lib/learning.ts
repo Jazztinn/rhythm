@@ -1,3 +1,5 @@
+import type { RhythmCompletion, RhythmDefinition, Task } from "./rhythm.ts";
+
 export const LEARNING_STORAGE_KEY = "rhythm.learning.v1";
 export const LEARNING_SCHEMA_VERSION = 1 as const;
 
@@ -52,6 +54,12 @@ export type PatternInference = Omit<LearnedPattern, "status" | "confirmedAt" | "
 export type LearningMigrationResult = {
   state: LearningState;
   status: "fresh" | "current" | "migrated" | "recovered";
+};
+
+export type BehaviorObservationInput = {
+  tasks: Task[];
+  rhythms: RhythmDefinition[];
+  rhythmCompletions: RhythmCompletion[];
 };
 
 const sources: LearningSource[] = ["tasks", "calendar", "rhythms", "slack", "notifications"];
@@ -255,4 +263,66 @@ export function setCategoryPaused(state: LearningState, category: string, paused
   if (paused) categories.add(category);
   else categories.delete(category);
   return { ...state, pausedCategories: [...categories] };
+}
+
+function timeBucket(iso: string) {
+  const hour = new Date(iso).getHours();
+  if (hour < 12) return { key: "morning", value: "Usually in the morning" };
+  if (hour < 18) return { key: "afternoon", value: "Usually in the afternoon" };
+  return { key: "evening", value: "Usually in the evening" };
+}
+
+function dominantWindow(values: string[]) {
+  const buckets = new Map<string, { value: string; count: number }>();
+  for (const value of values) {
+    const bucket = timeBucket(value);
+    const current = buckets.get(bucket.key);
+    buckets.set(bucket.key, { value: bucket.value, count: (current?.count ?? 0) + 1 });
+  }
+  return [...buckets.values()].sort((first, second) => second.count - first.count)[0];
+}
+
+/** Turn actual completion history into questions. Nothing returned here is confirmed. */
+export function inferBehaviorPatterns(input: BehaviorObservationInput): PatternInference[] {
+  const inferences: PatternInference[] = [];
+  const completedByProject = new Map<string, Task[]>();
+  for (const task of input.tasks) {
+    if (task.status !== "completed" || !task.completedAt) continue;
+    const group = completedByProject.get(task.project) ?? [];
+    group.push(task);
+    completedByProject.set(task.project, group);
+  }
+  for (const [project, tasks] of completedByProject) {
+    if (tasks.length < 3) continue;
+    const window = dominantWindow(tasks.map((task) => task.completedAt!));
+    if (!window || window.count < 3) continue;
+    const latest = tasks.map((task) => task.completedAt!).sort().at(-1)!;
+    inferences.push({
+      id: `task-project-${project.toLocaleLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+      category: "Task categories",
+      subject: `${project} work`,
+      value: window.value,
+      question: `I’ve noticed ${project} work often gets completed ${window.value.toLocaleLowerCase().replace("usually ", "")}. Is that generally accurate?`,
+      evidence: { count: window.count, sampleSize: tasks.length, summary: `Observed on ${window.count} of ${tasks.length} recent ${project} tasks.`, sources: ["tasks"] },
+      inferredAt: latest,
+    });
+  }
+
+  for (const rhythm of input.rhythms) {
+    const completions = input.rhythmCompletions.filter((completion) => completion.rhythmId === rhythm.id && completion.completedAt);
+    if (completions.length < 3) continue;
+    const window = dominantWindow(completions.map((completion) => completion.completedAt!));
+    if (!window || window.count < 3) continue;
+    const latest = completions.map((completion) => completion.completedAt!).sort().at(-1)!;
+    inferences.push({
+      id: `rhythm-${rhythm.id}-completion-window`,
+      category: "Rhythms",
+      subject: rhythm.title,
+      value: window.value,
+      question: `I’ve noticed you often complete ${rhythm.title} ${window.value.toLocaleLowerCase().replace("usually ", "")}. Is that generally accurate?`,
+      evidence: { count: window.count, sampleSize: completions.length, summary: `Observed on ${window.count} of ${completions.length} recent completions.`, sources: ["rhythms"] },
+      inferredAt: latest,
+    });
+  }
+  return inferences;
 }

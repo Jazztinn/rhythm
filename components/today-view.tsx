@@ -6,6 +6,7 @@ import { ArrowUpRight, CalendarClock, Check, ChevronDown, Circle, Clock3, CloudS
 import { useRhythm } from "@/components/rhythm-provider";
 import { OccurrenceActionSheet } from "@/components/occurrence-action-sheet";
 import { EmptyState, Spinner } from "@/components/ui";
+import { LEARNING_STORAGE_KEY, confirmedPatterns, migrateLearningState, type LearnedPattern } from "@/lib/learning";
 import { dateRangeFrom, resolveTaskDate, selectRecommendedTask, selectTaskInventory, summarizeWorkload, toDateKey, type Task } from "@/lib/rhythm";
 
 function TaskCard({ task, onToggle, onOpen, recommended = false, exiting = false }: { task: Task; onToggle: () => void; onOpen?: () => void; recommended?: boolean; exiting?: boolean }) {
@@ -32,6 +33,7 @@ export function TodayView() {
   const [laterOpen, setLaterOpen] = useState(false);
   const [occurrenceTask, setOccurrenceTask] = useState<Task | null>(null);
   const [exitingIds, setExitingIds] = useState<Set<string>>(new Set());
+  const [routineInsight, setRoutineInsight] = useState<{ pattern: LearnedPattern; confirmed: boolean } | null>(null);
   const [now, setNow] = useState(() => new Date(1704110400000));
 
   useEffect(() => {
@@ -40,8 +42,25 @@ export function TodayView() {
     return () => { window.clearTimeout(timer); window.clearInterval(interval); };
   }, []);
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      try {
+        const raw = window.localStorage.getItem(LEARNING_STORAGE_KEY);
+        const state = migrateLearningState(raw ? JSON.parse(raw) : null).state;
+        const confirmed = confirmedPatterns(state)[0];
+        const observation = state.enabled
+          ? state.patterns.find((pattern) => pattern.status === "still-learning" || pattern.status === "keep-observing")
+          : undefined;
+        setRoutineInsight(confirmed ? { pattern: confirmed, confirmed: true } : observation ? { pattern: observation, confirmed: false } : null);
+      } catch {
+        setRoutineInsight(null);
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
   const todayKey = toDateKey(now);
-  const workItems = getWorkItems(dateRangeFrom(now, 30, 30));
+  const workItems = getWorkItems(dateRangeFrom(now, 30, 14));
   const inventory = selectTaskInventory(workItems, now, 14);
   const todayTasks = workItems.filter((task) => {
     const date = resolveTaskDate(task, now);
@@ -49,7 +68,10 @@ export function TodayView() {
   });
   const pending = todayTasks.filter((task) => task.status === "pending");
   const completed = todayTasks.filter((task) => task.status === "completed");
-  const later = inventory.visible.filter((task) => task.later || (resolveTaskDate(task, now) ?? todayKey) > todayKey);
+  const later = inventory.visible.filter((task) => {
+    const date = resolveTaskDate(task, now) ?? todayKey;
+    return !task.generated && (task.later || date > todayKey);
+  });
   const recommended = selectRecommendedTask(todayTasks, now);
   const summary = summarizeWorkload(todayTasks);
   const nextScheduled = workItems
@@ -105,12 +127,17 @@ export function TodayView() {
     </section>
 
     <div className="embedded-assist"><span className="section-kicker"><Sparkles size={14} aria-hidden="true" /> Quiet assistance</span><span>Use the current open work as context. Nothing changes until you approve it.</span><Link href={`/chat?prompt=${encodeURIComponent("What is the smallest useful next step from today's open work?")}`}>Ask Rhythm <ArrowUpRight size={14} aria-hidden="true" /></Link></div>
+    {routineInsight ? <aside className={`routine-context ${routineInsight.confirmed ? "is-confirmed" : "is-learning"}`} aria-label={routineInsight.confirmed ? "Confirmed routine context" : "Routine observation awaiting confirmation"}>
+      <span className="section-kicker">{routineInsight.confirmed ? "A good time to start" : "I’ve noticed something"}</span>
+      <div><strong>{routineInsight.pattern.subject}</strong><span>{routineInsight.pattern.value}</span><p>{routineInsight.confirmed ? "You confirmed this pattern. Rhythm may use it gently when suggesting what comes next." : `${routineInsight.pattern.evidence.summary} This will not shape your plan unless you confirm it.`}</p></div>
+      <Link href={routineInsight.confirmed ? `/chat?prompt=${encodeURIComponent(`Is now a useful time for ${routineInsight.pattern.subject}?`)}` : "/settings"}>{routineInsight.confirmed ? "Ask Rhythm" : "Review pattern"}<ArrowUpRight size={14} aria-hidden="true" /></Link>
+    </aside> : null}
 
     <section className="content-grid">
       <div className="task-section">
         <div className="section-heading"><div><span className="section-kicker">Open work</span><h2>{recommended ? "Start here" : "Today"}</h2></div><span>{pending.length} remaining</span></div>
         {pending.length || exitingIds.size ? <ol className="task-list" aria-label="Open tasks for today">{todayTasks.filter((task) => task.status === "pending" || exitingIds.has(task.id)).map((task) => <TaskCard key={task.id} task={task} exiting={exitingIds.has(task.id)} recommended={task.id === recommended?.id} onToggle={() => toggleWorkItem(task)} onOpen={task.generated ? () => setOccurrenceTask(task) : undefined} />)}</ol> : <EmptyState title="Nothing needs your attention right now" description="You’re clear for now." action={<Link className="soft-button" href="/tasks">Open Tasks</Link>} />}
-        <button className={`later-toggle ${laterOpen ? "is-open" : ""}`} onClick={() => setLaterOpen((open) => !open)} aria-expanded={laterOpen}><span>Later <i>{later.length}</i>{inventory.hiddenGeneratedOpen ? <small> · more in Tasks</small> : null}</span><ChevronDown size={17} aria-hidden="true" /></button>
+        <button className={`later-toggle ${laterOpen ? "is-open" : ""}`} onClick={() => setLaterOpen((open) => !open)} aria-expanded={laterOpen}><span>Later <i>{later.length}</i></span><ChevronDown size={17} aria-hidden="true" /></button>
         {laterOpen ? <ol className="later-list" aria-label="Later tasks">{later.map((task) => <TaskCard key={task.id} task={task} onToggle={() => toggleWorkItem(task)} onOpen={task.generated ? () => setOccurrenceTask(task) : undefined} />)}</ol> : null}
       </div>
 
