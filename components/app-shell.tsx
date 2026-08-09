@@ -22,7 +22,7 @@ function SearchDialog({ open, onClose, onOpenTask }: { open: boolean; onClose: (
   const { getWorkItems, completeOccurrence, uncompleteOccurrence } = useRhythm();
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
-  const results = useMemo(() => searchTasks(getWorkItems(dateRangeFrom(new Date(), 365, 365)), query), [getWorkItems, query]);
+  const results = useMemo(() => searchTasks(getWorkItems(dateRangeFrom(new Date(), 90, 45)), query), [getWorkItems, query]);
   const safeActiveIndex = Math.min(activeIndex, Math.max(results.length - 1, 0));
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
@@ -142,7 +142,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         {profileOpen ? <div className="profile-popover" role="dialog" aria-label="Local workspace profile">
           <span className="section-kicker">Local workspace</span>
           <strong>Jazz Tinn</strong>
-          <p>{tasks.length - completed} open · {completed} complete</p>
+          <p>{tasks.length - completed ? `${tasks.length - completed} tasks open` : "You’re clear for now"}</p>
           <div><Link href="/settings" onClick={() => setProfileOpen(false)}>Settings & connections</Link><Link href="/tasks" onClick={() => setProfileOpen(false)}>Manage tasks</Link><ConfirmAction label="Restore starter data" title="Restore starter data?" description="This replaces the current local tasks and rhythms with the starter workspace. Your current workspace will be kept as an undo snapshot." confirmLabel="Restore starter data" onConfirm={() => { recoverStorage(); setProfileOpen(false); }} /></div>
         </div> : null}
       </div>

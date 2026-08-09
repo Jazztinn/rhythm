@@ -35,12 +35,11 @@ export function TasksView() {
   const [project, setProject] = useState("all");
   const [editorTask, setEditorTask] = useState<Task | "new" | null>(null);
   const [occurrenceTask, setOccurrenceTask] = useState<Task | null>(null);
-  const [occurrenceDays, setOccurrenceDays] = useState(30);
   const [completedLimit, setCompletedLimit] = useState(40);
   const [exitingIds, setExitingIds] = useState<Set<string>>(new Set());
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const today = toDateKey(new Date());
-  const workItems = useMemo(() => getWorkItems(dateRangeFrom(new Date(), 365, 365)), [getWorkItems]);
+  const workItems = useMemo(() => getWorkItems(dateRangeFrom(new Date(), 90, 45)), [getWorkItems]);
   const projects = useMemo(() => [...new Set(workItems.map((task) => task.project).filter(Boolean))].sort(), [workItems]);
 
   useEffect(() => {
@@ -53,9 +52,9 @@ export function TasksView() {
     return () => window.clearTimeout(timer);
   }, [hydrated, workItems]);
 
-  const openTasks = useMemo(() => workItems.filter((task) => task.status === "pending"), [workItems]);
-  const completedTasks = useMemo(() => workItems.filter((task) => task.status === "completed"), [workItems]);
-  const inventory = useMemo(() => selectTaskInventory(workItems, new Date(), occurrenceDays), [occurrenceDays, workItems]);
+  const inventory = useMemo(() => selectTaskInventory(workItems, new Date(), 30), [workItems]);
+  const openTasks = useMemo(() => inventory.visible.filter((task) => task.status === "pending"), [inventory.visible]);
+  const completedTasks = useMemo(() => inventory.visible.filter((task) => task.status === "completed"), [inventory.visible]);
   const inventoryTasks = useMemo(() => {
     const active = new Set(exitingIds);
     return inventory.visible.filter((task) => task.status === "pending" || active.has(task.id));
@@ -93,11 +92,11 @@ export function TasksView() {
 
   return <div className="workspace-view tasks-view">
     <header className="workspace-header">
-      <div><p className="eyebrow">A factual task inventory</p><h1>Tasks</h1><p className="page-subtitle">{openTasks.length} open · {completedTasks.length} completed · {openTasks.reduce((sum, task) => sum + task.estimateMinutes, 0)} minutes planned</p></div>
+      <div><p className="eyebrow">What needs doing</p><h1>Tasks</h1><p className="page-subtitle">{openTasks.length ? `${openTasks.length} thing${openTasks.length === 1 ? "" : "s"} in view.` : "Nothing needs your attention right now."}</p></div>
       <div className="workspace-header-actions">{canUndo ? <Button type="button" onClick={undoLast}>Undo last change</Button> : null}<Button variant="primary" onClick={() => setEditorTask("new")}><Plus size={17} aria-hidden="true" /> Add task</Button></div>
     </header>
 
-    <section className="task-summary-line" aria-label="Task summary"><strong>{openTasks.length} open task{openTasks.length === 1 ? "" : "s"}</strong><span>{openTasks.reduce((sum, task) => sum + task.estimateMinutes, 0)} estimated minutes</span><span>Completed tasks are kept below.</span></section>
+    <section className="task-summary-line" aria-label="Task summary"><strong>{openTasks.length} open task{openTasks.length === 1 ? "" : "s"}</strong><span>{openTasks.length ? `About ${Math.max(5, Math.round(openTasks.reduce((sum, task) => sum + task.estimateMinutes, 0) / 5) * 5)} minutes of nearby work` : "You’re clear for now"}</span><span>Rhythm occurrences appear only when relevant.</span></section>
     <div className="embedded-assist"><span className="section-kicker"><Sparkles size={14} aria-hidden="true" /> Need a read</span><span>Ask about the current task list; no changes happen without approval.</span><Link href={`/chat?prompt=${encodeURIComponent("Which open task should I handle first, and why?")}`}>Ask Rhythm <ArrowUpRight size={14} aria-hidden="true" /></Link></div>
 
     <section className="workspace-panel tasks-panel">
@@ -112,9 +111,8 @@ export function TasksView() {
           if (filter !== "all" && filter !== bucket) return null;
           return <section className="task-group" key={bucket} aria-labelledby={`task-group-${bucket}`}><div className="task-group__heading"><h2 id={`task-group-${bucket}`}>{label}</h2><span>{group.length}</span></div>{group.length ? <ol className="full-task-list" aria-label={`${label} tasks`}>{group.map((task) => <TaskRow key={task.id} task={task} exiting={exitingIds.has(task.id) || deletingId === task.id} onToggle={() => toggleWorkItem(task)} onEdit={() => task.generated ? setOccurrenceTask(task) : setEditorTask(task)} />)}</ol> : <p className="task-group__empty">No {label.toLocaleLowerCase()} open tasks.</p>}</section>;
         })}
-        {inventory.hiddenGeneratedOpen ? <div className="inventory-notice" role="status"><span>{inventory.hiddenGeneratedOpen} later generated occurrence{inventory.hiddenGeneratedOpen === 1 ? "" : "s"} are outside this view.</span><Button type="button" onClick={() => setOccurrenceDays((days) => days + 60)}>Show the next 60 days</Button></div> : null}
         {!visibleTasks.length && filteredByControls ? <EmptyState title="No tasks match these filters" description="Try another view, project, or search term." action={<Button type="button" onClick={() => { setFilter("all"); setProject("all"); setQuery(""); }}>Clear filters</Button>} /> : null}
-        {!openTasks.length && !filteredByControls ? <EmptyState title="No open tasks" description="Add a task when something needs a place in your workspace." action={<Button type="button" variant="primary" onClick={() => setEditorTask("new")}>Add your first task</Button>} /> : null}
+        {!openTasks.length && !filteredByControls ? <EmptyState title="Nothing needs your attention right now" description="Add a task when something needs a place." action={<Button type="button" variant="primary" onClick={() => setEditorTask("new")}>Add a task</Button>} /> : null}
       </div>
     </section>
 
