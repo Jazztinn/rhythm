@@ -1,5 +1,6 @@
-import { ConnectionsView } from "@/components/integration-status";
+import { ConnectionsSection } from "@/components/integration-status";
+import { RoutineLearningSettings } from "@/components/routine-learning";
 
 export default function SettingsPage() {
-  return <ConnectionsView />;
+  return <RoutineLearningSettings connections={<ConnectionsSection />} />;
 }

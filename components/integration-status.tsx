@@ -37,14 +37,21 @@ export function IntegrationStatusCard({ provider, connection, onChanged }: { pro
 }
 
 export function ConnectionsView() {
+  return <div className="workspace-view settings-workspace">
+    <header className="workspace-header"><div><p className="eyebrow">Private connections</p><h1>Connections</h1><p className="page-subtitle">Connect only the sources Rhythm needs. Local tasks and Rhythms stay usable offline.</p></div></header>
+    <ConnectionsSection />
+  </div>;
+}
+
+export function ConnectionsSection() {
   const { createTask } = useRhythm();
   const [status, setStatus] = useState<IntegrationResponse<StatusData> | null>(null);
   const [offline, setOffline] = useState(false);
   const refresh = async () => setStatus(await integrationFetch<StatusData>("/api/integrations/status"));
   // Status is request-backed and intentionally refreshed after the client mounts.
   useEffect(() => { const timer = window.setTimeout(() => { setOffline(!navigator.onLine); void refresh(); }, 0); const on = () => setOffline(false); const off = () => setOffline(true); window.addEventListener("online", on); window.addEventListener("offline", off); return () => { window.clearTimeout(timer); window.removeEventListener("online", on); window.removeEventListener("offline", off); }; }, []);
-  return <div className="workspace-view settings-workspace">
-    <header className="workspace-header"><div><p className="eyebrow">Private connections</p><h1>Settings</h1><p className="page-subtitle">Connect only the sources Rhythm needs. Local tasks and Rhythms stay usable offline.</p></div><Button onClick={() => void refresh()} disabled={offline || !status?.data}><RefreshCw size={15} /> Refresh status</Button></header>
+  return <div>
+    <div style={{ display: "flex", justifyContent: "flex-end" }}><Button onClick={() => void refresh()} disabled={offline || !status?.data}><RefreshCw size={15} /> Refresh status</Button></div>
     {offline ? <StatusMessage tone="notice"><WifiOff size={15} /> Offline. Local work is still available; provider controls are paused.</StatusMessage> : null}
     {status?.error ? <StatusMessage tone="error">{status.error.message} <Button onClick={() => void refresh()}>Try again</Button></StatusMessage> : null}
     <section className="integration-grid">
