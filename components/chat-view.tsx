@@ -1,7 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { gsap } from "gsap";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, Check, Clock3, CornerDownRight, Pencil, Plus, RefreshCw, RotateCcw, Sparkles, WandSparkles, X } from "lucide-react";
 import { Button, Dialog, StatusMessage } from "@/components/ui";
 import { useRhythm } from "@/components/rhythm-provider";
@@ -130,15 +129,6 @@ export function ChatView() {
     if (hydrated) window.localStorage.setItem(CHAT_KEY, JSON.stringify(messages));
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [hydrated, messages, isThinking]);
-
-  useLayoutEffect(() => {
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    const context = gsap.context(() => {
-      gsap.from("[data-chat-reveal]", { opacity: 0, y: 18, duration: 0.7, stagger: 0.08, ease: "power3.out" });
-      gsap.to(".chat-orb", { scale: 1.12, xPercent: 7, duration: 7, repeat: -1, yoyo: true, ease: "sine.inOut" });
-    }, root);
-    return () => context.revert();
-  }, []);
 
   const pendingTasks = useMemo(() => tasks.filter((task) => task.status === "pending" && !task.later), [tasks]);
   const workItems = useMemo(() => getWorkItems(dateRangeFrom(new Date(), 365, 365)), [getWorkItems]);

@@ -2204,3 +2204,358 @@ summary:focus-visible {
   .ai-proposals__batch { align-items: flex-start; flex-direction: column; }
   .proposal-edit-grid { grid-template-columns: 1fr; }
 }
+
+/* Final motion, responsive, and semantic surface pass. */
+.grain { animation: none; }
+
+.task-card,
+.full-task-row {
+  overflow: hidden;
+  transition: opacity 180ms ease, transform 240ms var(--ease-out), max-height 240ms var(--ease-out), background-color 180ms ease;
+}
+
+.task-card.is-exiting,
+.full-task-row.is-exiting {
+  pointer-events: none;
+  animation: task-exit 240ms var(--ease-out) both;
+}
+
+.task-card:not(.is-exiting),
+.full-task-row:not(.is-exiting) {
+  animation: task-enter 240ms var(--ease-out) both;
+}
+
+@keyframes task-enter {
+  from { opacity: 0; transform: translateY(8px); box-shadow: 0 0 0 0 rgba(201, 250, 37, 0); }
+  55% { box-shadow: 0 0 0 4px rgba(201, 250, 37, .18); }
+  to { opacity: 1; transform: translateY(0); box-shadow: var(--shadow-sm, 0 8px 24px rgba(40,48,35,.06)); }
+}
+
+@keyframes task-exit {
+  from { max-height: 120px; opacity: 1; transform: translateY(0); }
+  to { max-height: 0; opacity: 0; transform: translateY(-4px); padding-top: 0; padding-bottom: 0; border-width: 0; }
+}
+
+.task-card.is-done svg,
+.full-task-row.is-done > button svg,
+.routine-card.is-complete .routine-actions button:last-child svg,
+.search-check.is-complete {
+  animation: check-settle 160ms var(--ease-out) both;
+}
+
+@keyframes check-settle {
+  from { opacity: .45; transform: scale(.88); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.nav-item.is-active::before { transition: height 220ms var(--ease-out), transform 220ms var(--ease-out), opacity 220ms ease; }
+.search-result,
+.ai-proposal,
+.suggestion-row button,
+.ai-receipt { animation: content-in 200ms var(--ease-out) both; }
+.ui-dialog.is-closing { animation: dialog-out 180ms ease-in both; }
+.ui-dialog.is-closing::backdrop { animation: backdrop-out 180ms ease-in both; }
+@keyframes dialog-out { to { opacity: 0; transform: translateY(-6px) scale(.985); } }
+@keyframes backdrop-out { to { opacity: 0; } }
+
+[data-workspace-reveal],
+[data-chat-reveal] { animation: content-in 240ms var(--ease-out) both; }
+
+.rhythm-orbit-ring { animation: none; }
+.rhythm-orbit.is-visible .rhythm-orbit-ring { animation: orbit-spin 28s linear infinite; }
+@keyframes orbit-spin { to { transform: rotate(360deg); } }
+
+.embedded-assist {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-5);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-muted);
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+.embedded-assist .section-kicker { flex: 0 0 auto; margin: 0; color: #62538d; font-size: 11px; }
+.embedded-assist > span:nth-child(2) { min-width: 0; }
+.embedded-assist a { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; flex: 0 0 auto; color: #62538d; font-weight: 650; text-decoration: none; }
+.inventory-notice,
+.timezone-notice { margin: var(--space-4) 0 0; }
+.inventory-notice { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3) var(--space-4); border: 1px solid #d8c18e; border-radius: var(--radius-sm); background: #fff8e8; color: #76591f; font-size: 12px; }
+.inventory-notice .ui-button { min-height: 36px; padding-inline: var(--space-3); }
+.notice-dismiss { width: 36px; height: 36px; display: grid; place-items: center; flex: 0 0 auto; border: 1px solid currentColor; border-radius: 10px; background: transparent; color: inherit; cursor: pointer; }
+.timezone-notice .status-message { border-color: #d8c18e; background: #fff8e8; color: #76591f; }
+
+.calendar-agenda-mobile { backdrop-filter: none; }
+.calendar-agenda-days { display: grid; gap: var(--space-4); }
+.calendar-agenda-day { padding-top: var(--space-3); border-top: 1px solid var(--color-border); }
+.calendar-agenda-day h3 { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); margin: 0 0 var(--space-2); font-size: 13px; font-weight: 650; }
+.calendar-agenda-day h3 time { color: var(--color-text-muted); font-size: 11px; font-weight: 500; }
+.calendar-agenda-day > p { margin: 0; color: var(--color-text-muted); font-size: 12px; }
+.calendar-agenda-day a { min-height: 48px; }
+
+/* Supporting text stays legible in the calendar/rail surfaces. */
+.calendar-event small,
+.calendar-row > span,
+.calendar-day-head span,
+.calendar-task-strip strong,
+.calendar-task-strip small,
+.full-task-row div > span,
+.routine-card small,
+.routine-provenance { font-size: 11px; }
+
+@media (min-width: 768px) and (max-width: 1099px) {
+  .nav-item { position: relative; }
+  .nav-item::after { content: attr(title); position: absolute; left: calc(100% + 10px); top: 50%; z-index: 40; padding: 6px 8px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-surface-strong); color: var(--color-text); box-shadow: var(--shadow-sm); font-size: 11px; opacity: 0; pointer-events: none; transform: translateY(-50%) translateX(-4px); transition: opacity 160ms ease, transform 160ms var(--ease-out); }
+  .nav-item:hover::after,
+  .nav-item:focus-visible::after { opacity: 1; transform: translateY(-50%) translateX(0); }
+  .workspace-panel,
+  .calendar-panel,
+  .provider-calendar-panel,
+  .slack-review { max-width: 100%; overflow-x: auto; }
+  .task-toolbar { min-width: 680px; }
+}
+
+@media (max-width: 767px) {
+  .app-content { padding-top: 118px; }
+  .sidebar { min-height: 118px; height: auto; display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: 56px 48px; gap: 2px 10px; padding: 8px 12px 6px; }
+  .brand { grid-column: 1; grid-row: 1; justify-content: flex-start; }
+  .sidebar-bottom { grid-column: 2; grid-row: 1; justify-content: flex-end; }
+  .mobile-search { width: auto; padding: 0 10px; gap: 6px; }
+  .mobile-search span { display: inline; font-size: 11px; }
+  .nav-stack { grid-column: 1 / -1; grid-row: 2; width: 100%; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 3px; overflow: visible; }
+  .nav-item { width: auto; min-width: 0; padding: 0; justify-content: center; }
+  .nav-item.is-active > span { display: none; }
+  .nav-item.is-active::before { bottom: -6px; }
+  .calendar-panel { display: none; }
+  .calendar-agenda-mobile { display: block; }
+  .calendar-agenda-mobile .section-heading { margin-bottom: var(--space-4); }
+  .embedded-assist { align-items: flex-start; flex-wrap: wrap; }
+  .embedded-assist > span:nth-child(2) { flex: 1 1 180px; }
+  .embedded-assist a { margin-left: auto; }
+  .inventory-notice { align-items: flex-start; flex-direction: column; }
+}
+
+@media (max-width: 520px) {
+  .ui-sheet { padding-bottom: env(safe-area-inset-bottom); }
+  .ui-sheet .ui-dialog__surface { max-height: calc(100svh - 12px - env(safe-area-inset-bottom)); padding: var(--space-5) var(--space-4) calc(var(--space-5) + env(safe-area-inset-bottom)); overflow-y: auto; }
+  .occurrence-actions { position: sticky; bottom: 0; z-index: 1; padding: var(--space-3) 0; background: rgba(248,249,243,.98); }
+  .occurrence-actions .ui-button { width: 100%; }
+  .provider-event { align-items: flex-start; flex-direction: column; }
+  .provider-event__actions { width: 100%; flex-wrap: wrap; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+  .task-card.is-exiting,
+  .full-task-row.is-exiting { opacity: .5; max-height: none; transform: none; }
+}
+
+/* Final supporting-type floor: keep visible secondary UI readable without
+   changing decorative glyphs, icons, or screen-reader-only content. */
+.nav-item i,
+.profile-popover > p,
+.profile-popover a,
+.profile-popover button,
+.search-results > .section-kicker,
+.search-results span,
+.search-empty,
+.search-dialog footer,
+.section-kicker,
+.eyebrow,
+.section-heading > span,
+.timeline,
+.task-project,
+.task-copy p,
+.task-meta strong,
+.task-meta span,
+.later-toggle i,
+.status-pill,
+.week-bars small,
+.week-note p,
+.action-receipts span,
+.chat-error,
+.chat-error button,
+.prompt-grid button,
+.suggestion-row button,
+.composer-note,
+.context-task-list strong,
+.context-task-list span,
+.context-task-list small,
+.context-window span,
+.context-note p,
+.metric-top,
+.filter-tabs button,
+.full-task-row div > span,
+.full-task-row > p,
+.full-task-row > small,
+.editor-field > span,
+.editor-check > span,
+.delete-button,
+.delete-confirm,
+.delete-confirm button,
+.next-event-card > p,
+.next-event-card > div,
+.calendar-toolbar .today-chip,
+.calendar-day-head span,
+.calendar-row > span,
+.calendar-event small,
+.calendar-event strong,
+.calendar-agenda-day h3 time,
+.calendar-task-strip > span,
+.calendar-task-strip strong,
+.calendar-task-strip small,
+.calendar-agenda-mobile small,
+.streak strong,
+.streak span,
+.routine-card small,
+.routine-card p,
+.routine-provenance,
+.routine-secondary-actions .ui-button,
+.provenance-pill,
+.rhythm-insight > p,
+.insight-chart small,
+.integration-status,
+.integration-field,
+.provider-event span,
+.provider-event small,
+.provider-conflict,
+.provider-event a,
+.provider-event__actions .ui-button,
+.slack-message-list article small,
+.slack-toolbar select,
+.ai-nudge small,
+.ai-proposals__batch,
+.ai-proposal__heading,
+.ai-proposal__heading .section-kicker,
+.ai-proposal--approved,
+.ai-proposal--muted,
+.ai-proposal--blocked,
+.ai-proposal__target,
+.ai-proposal__reason,
+.ai-proposal__actions .ui-button,
+.ai-receipt,
+.empty-filter {
+  font-size: 11px !important;
+}
+
+.profile-popover a,
+.profile-popover button,
+.search-results span,
+.ai-proposal__heading,
+.ai-proposal__target,
+.ai-proposal__reason,
+.context-task-list span,
+.context-task-list small,
+.context-note p,
+.calendar-task-strip strong,
+.calendar-task-strip small,
+.routine-card p,
+.routine-provenance,
+.provider-event span,
+.provider-event small,
+.provider-conflict,
+.slack-message-list article small,
+.ai-receipt {
+  overflow-wrap: anywhere;
+}
+
+.search-dialog footer { flex-wrap: wrap; gap: 8px 16px; }
+.suggestion-row button { white-space: normal; }
+.ai-proposal__heading { flex-wrap: wrap; }
+.streak > *,
+.routine-card > *,
+.provider-event > * { min-width: 0; }
+
+@media (max-width: 767px) {
+  .nav-item i,
+  .profile-popover > p,
+  .profile-popover a,
+  .profile-popover button,
+  .search-results > .section-kicker,
+  .search-results span,
+  .search-empty,
+  .search-dialog footer,
+  .section-kicker,
+  .eyebrow,
+  .section-heading > span,
+  .timeline,
+  .task-project,
+  .task-copy p,
+  .task-meta strong,
+  .task-meta span,
+  .later-toggle i,
+  .status-pill,
+  .week-bars small,
+  .week-note p,
+  .action-receipts span,
+  .chat-error,
+  .chat-error button,
+  .prompt-grid button,
+  .suggestion-row button,
+  .composer-note,
+  .context-task-list strong,
+  .context-task-list span,
+  .context-task-list small,
+  .context-window span,
+  .context-note p,
+  .metric-top,
+  .filter-tabs button,
+  .full-task-row div > span,
+  .full-task-row > p,
+  .full-task-row > small,
+  .editor-field > span,
+  .editor-check > span,
+  .delete-button,
+  .delete-confirm,
+  .delete-confirm button,
+  .next-event-card > p,
+  .next-event-card > div,
+  .calendar-toolbar .today-chip,
+  .calendar-day-head span,
+  .calendar-row > span,
+  .calendar-event small,
+  .calendar-event strong,
+  .calendar-agenda-day h3 time,
+  .calendar-task-strip > span,
+  .calendar-task-strip strong,
+  .calendar-task-strip small,
+  .calendar-agenda-mobile small,
+  .streak strong,
+  .streak span,
+  .routine-card small,
+  .routine-card p,
+  .routine-provenance,
+  .routine-secondary-actions .ui-button,
+  .provenance-pill,
+  .rhythm-insight > p,
+  .insight-chart small,
+  .integration-status,
+  .integration-field,
+  .provider-event span,
+  .provider-event small,
+  .provider-conflict,
+  .provider-event a,
+  .provider-event__actions .ui-button,
+  .slack-message-list article small,
+  .slack-toolbar select,
+  .ai-nudge small,
+  .ai-proposals__batch,
+  .ai-proposal__heading,
+  .ai-proposal__heading .section-kicker,
+  .ai-proposal--approved,
+  .ai-proposal--muted,
+  .ai-proposal--blocked,
+  .ai-proposal__target,
+  .ai-proposal__reason,
+  .ai-proposal__actions .ui-button,
+  .ai-receipt,
+  .empty-filter {
+    font-size: 12px !important;
+  }
+}
