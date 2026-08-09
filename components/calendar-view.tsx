@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { gsap } from "gsap";
 import { ArrowLeft, ArrowRight, CalendarDays, Clock3, Sparkles } from "lucide-react";
 import { useRhythm } from "@/components/rhythm-provider";
 import { OccurrenceActionSheet } from "@/components/occurrence-action-sheet";
@@ -67,15 +66,9 @@ export function CalendarView() {
     .filter((item): item is { task: Task; date: Date } => item.date !== null && item.date.getTime() >= now.getTime())
     .sort((a, b) => a.date.getTime() - b.date.getTime())[0];
 
-  useLayoutEffect(() => {
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    const context = gsap.context(() => gsap.from("[data-workspace-reveal]", { opacity: 0, y: 18, duration: 0.72, stagger: 0.08, ease: "power3.out" }), root);
-    return () => context.revert();
-  }, []);
-
-  useLayoutEffect(() => {
-    if (!window.matchMedia("(max-width: 767px)").matches) return;
+  useEffect(() => {
     const panel = calendarPanel.current;
+    if (!panel || !window.matchMedia("(max-width: 767px)").matches) return;
     const target = panel?.querySelector<HTMLElement>(".calendar-day-head.is-active")
       ?? panel?.querySelector<HTMLElement>(".calendar-day-head");
     if (!panel || !target) return;
@@ -89,7 +82,7 @@ export function CalendarView() {
     <div className="workspace-view calendar-workspace" ref={root}>
       <header className="workspace-header" data-workspace-reveal>
         <div><p className="eyebrow">Your time, at a glance</p><h1>Calendar</h1><p className="page-subtitle">Every dated task appears here automatically.</p></div>
-        <span className="weather"><CalendarDays size={15} /> Live tasks</span>
+        <span className="weather"><CalendarDays size={15} /> Local task view</span>
       </header>
       <section className="calendar-summary" data-workspace-reveal>
         <article className="availability-card"><div><span className="section-kicker"><Sparkles size={14} /> Dated task minutes</span><h2>{plannedMinutes ? `${Math.floor(plannedMinutes / 60)}h ${plannedMinutes % 60}m planned.` : "No dated tasks yet."}</h2><p>Based on your dated tasks only: {weekTasks.length} task{weekTasks.length === 1 ? "" : "s"}. Rhythm does not estimate your availability without evidence.</p></div></article>
@@ -111,9 +104,9 @@ export function CalendarView() {
           })}
         </div>
       </section>
-      <section className="calendar-agenda-mobile" aria-label="Mobile agenda">
+      <section className="calendar-agenda-mobile" aria-label="Week agenda">
         <div className="section-heading compact"><div><span className="section-kicker"><CalendarDays size={14} /> Agenda</span><h2>This week</h2></div><span>{weekTasks.length} local task{weekTasks.length === 1 ? "" : "s"}</span></div>
-        {weekTasks.length ? <div>{weekTasks.slice().sort((a, b) => `${resolveTaskDate(a, now) ?? "9999"}T${a.dueTime ?? "99:99"}`.localeCompare(`${resolveTaskDate(b, now) ?? "9999"}T${b.dueTime ?? "99:99"}`)).map((task) => <Link href="/tasks" key={task.id}><time>{task.dueTime ?? "Flexible"}</time><span><strong>{task.title}</strong><small>{resolveTaskDate(task, now) ?? "No date"} · {task.estimateMinutes} min</small></span></Link>)}</div> : <p className="provider-empty">No local tasks in this week.</p>}
+        <div className="calendar-agenda-days">{days.map((day) => { const key = toDateKey(day); const dayTasks = weekTasks.filter((task) => resolveTaskDate(task, now) === key).sort((a, b) => (a.dueTime ?? "99:99").localeCompare(b.dueTime ?? "99:99")); return <section key={key} className="calendar-agenda-day" aria-labelledby={`agenda-${key}`}><h3 id={`agenda-${key}`}><span>{new Intl.DateTimeFormat("en-US", { weekday: "long" }).format(day)}</span><time dateTime={key}>{new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(day)}</time></h3>{dayTasks.length ? dayTasks.map((task) => <Link href="/tasks" key={task.id}><time>{task.dueTime ?? "Flexible"}</time><span><strong>{task.title}</strong><small>{task.generated ? "Rhythm occurrence · " : ""}{task.estimateMinutes} min{task.status === "completed" ? " · Complete" : ""}</small></span></Link>) : <p>No local tasks.</p>}</section>; })}</div>
       </section>
       <GoogleCalendarPanel start={days[0].toISOString()} end={addDays(days[6], 1).toISOString()} tasks={weekTasks} />
       <aside className="calendar-task-strip" data-workspace-reveal><span>{unscheduled.length} need a time</span>{unscheduled.slice(0, 4).map((task) => <Link href="/tasks" key={task.id}><article><i /><div><strong>{task.title}</strong><small>{task.generated ? "From Rhythm · " : ""}{task.estimateMinutes} min · {task.project}</small></div></article></Link>)}</aside>

@@ -24,17 +24,30 @@ type DialogProps = {
 export function Dialog({ open, onClose, title, children, labelledBy, className = "" }: DialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const lastFocused = useRef<HTMLElement | null>(null);
+  const closeTimer = useRef<number | null>(null);
+  const [closing, setClosing] = useState(false);
   const titleId = useId();
   const closeDialog = useCallback(() => {
-    if (dialogRef.current?.open) dialogRef.current.close();
-    if (lastFocused.current && document.contains(lastFocused.current)) lastFocused.current.focus();
-    onClose();
-  }, [onClose]);
+    if (!dialogRef.current?.open || closing) return;
+    setClosing(true);
+    if (closeTimer.current !== null) window.clearTimeout(closeTimer.current);
+    closeTimer.current = window.setTimeout(() => {
+      dialogRef.current?.close();
+      setClosing(false);
+      if (lastFocused.current && document.contains(lastFocused.current)) lastFocused.current.focus();
+      onClose();
+      closeTimer.current = null;
+    }, 180);
+  }, [closing, onClose]);
+
+  useEffect(() => () => { if (closeTimer.current !== null) window.clearTimeout(closeTimer.current); }, []);
 
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
     if (open && !dialog.open) {
+      if (closeTimer.current !== null) window.clearTimeout(closeTimer.current);
+      setClosing(false);
       lastFocused.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
       dialog.showModal();
       requestAnimationFrame(() => {
@@ -42,8 +55,8 @@ export function Dialog({ open, onClose, title, children, labelledBy, className =
         first?.focus();
       });
     }
-    if (!open && dialog.open) dialog.close();
-  }, [open]);
+    if (!open && dialog.open && !closing) dialog.close();
+  }, [closing, open]);
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -81,7 +94,7 @@ export function Dialog({ open, onClose, title, children, labelledBy, className =
   }, [closeDialog]);
 
   return (
-    <dialog ref={dialogRef} className={`ui-dialog ${className}`.trim()} aria-labelledby={labelledBy ?? titleId} onMouseDown={(event) => { if (event.target === event.currentTarget) closeDialog(); }}>
+    <dialog ref={dialogRef} className={`ui-dialog ${closing ? "is-closing" : ""} ${className}`.trim()} aria-labelledby={labelledBy ?? titleId} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); closeDialog(); } }} onMouseDown={(event) => { if (event.target === event.currentTarget) closeDialog(); }}>
       <div className="ui-dialog__surface">
         <div className="ui-dialog__heading">
           <h2 id={labelledBy ?? titleId}>{title}</h2>

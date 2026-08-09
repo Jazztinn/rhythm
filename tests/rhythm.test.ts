@@ -16,6 +16,7 @@ import {
   seedRhythms,
   seedTasks,
   selectRecommendedTask,
+  selectTaskInventory,
   summarizeWorkload,
   taskTargetSummary,
   toDateKey,
@@ -181,6 +182,16 @@ test("summaries stay truthful for zero, overloaded, disconnected, and partial ev
   assert.equal(summarizeWorkload(seedTasks, { status: "disconnected" }).evidence, "tasks-only");
   assert.equal(summarizeWorkload(seedTasks, { status: "partial", scheduledMinutes: 120 }).evidence, "partial-calendar");
   assert.match(summarizeWorkload(seedTasks, { status: "partial" }).statement, /partial calendar evidence/);
+});
+
+test("task inventory keeps manual work visible while bounding generated work", () => {
+  const now = new Date("2026-08-09T12:00:00");
+  const manual = { ...seedTasks[0], id: "manual-open", status: "pending" as const };
+  const inside = { ...manual, id: "rhythm:daily:2026-08-10", generated: true, rhythmId: "daily", occurrenceDate: "2026-08-10", dueDate: "2026-08-10" };
+  const outside = { ...inside, id: "rhythm:daily:2026-10-10", occurrenceDate: "2026-10-10", dueDate: "2026-10-10" };
+  const result = selectTaskInventory([manual, inside, outside], now, 30);
+  assert.deepEqual(result.visible.map((task) => task.id), ["manual-open", "rhythm:daily:2026-08-10"]);
+  assert.equal(result.hiddenGeneratedOpen, 1);
 });
 
 test("generates daily occurrences with inclusive boundaries and stable IDs", () => {

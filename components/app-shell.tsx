@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, ViewTransition } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CalendarDays, CheckSquare2, MessageCircleMore, Orbit, Search, Sparkles } from "lucide-react";
+import { CalendarDays, CheckSquare2, MessageCircleMore, Orbit, Search, Sparkles, X } from "lucide-react";
 import { TaskEditor } from "@/components/task-editor";
 import { OccurrenceActionSheet } from "@/components/occurrence-action-sheet";
 import { ConfirmAction, Dialog, StatusMessage, Toast } from "@/components/ui";
@@ -70,6 +70,20 @@ function SearchDialog({ open, onClose, onOpenTask }: { open: boolean; onClose: (
   </Dialog>;
 }
 
+function TimezoneChangeNotice() {
+  const [notice, setNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    const current = Intl.DateTimeFormat().resolvedOptions().timeZone || "your local timezone";
+    const previous = window.localStorage.getItem("rhythm.timezone");
+    window.localStorage.setItem("rhythm.timezone", current);
+    if (previous && previous !== current) window.setTimeout(() => setNotice(`Your timezone changed from ${previous} to ${current}. Dates stay local; review timed work before acting.`), 0);
+  }, []);
+
+  if (!notice) return null;
+  return <div className="timezone-notice"><StatusMessage><span>{notice}</span><button type="button" className="notice-dismiss" aria-label="Dismiss timezone change notice" onClick={() => setNotice(null)}><X size={16} aria-hidden="true" /></button></StatusMessage></div>;
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const navigationRef = useRef<HTMLElement>(null);
@@ -123,7 +137,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         })}
       </nav>
       <div className="sidebar-bottom">
-        <button ref={searchTriggerRef} className="icon-button mobile-search" aria-label="Search Rhythm" title="Search (⌘K)" onClick={() => { setSearchOpen(true); setProfileOpen(false); }}><Search size={18} strokeWidth={1.7} aria-hidden="true" /></button>
+        <button ref={searchTriggerRef} className="icon-button mobile-search" aria-label="Search Rhythm" title="Search (⌘K)" onClick={() => { setSearchOpen(true); setProfileOpen(false); }}><Search size={18} strokeWidth={1.7} aria-hidden="true" /><span>Search</span></button>
         <button className="profile-button" aria-label="Open local workspace profile" aria-expanded={profileOpen} title="Local workspace" onClick={() => { setProfileOpen((open) => !open); setSearchOpen(false); }}><span>JT</span><i aria-hidden="true" /></button>
         {profileOpen ? <div className="profile-popover" role="dialog" aria-label="Local workspace profile">
           <span className="section-kicker">Local workspace</span>
@@ -134,6 +148,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </div>
     </aside>
     <main id="main-content" className="app-content">
+      <TimezoneChangeNotice />
       {hydrated ? <ViewTransition default="page-crossfade">{children}</ViewTransition> : <div className="loading-shell" role="status" aria-live="polite"><div className="loading-shell__bar" /><p>Loading your local workspace…</p></div>}
     </main>
     <div className="grain" aria-hidden="true" />

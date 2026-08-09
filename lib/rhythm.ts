@@ -240,6 +240,35 @@ export function dateRangeFrom(now = new Date(), daysBefore = 365, daysAfter = 36
   return { start: toDateKey(addDays(now, -daysBefore)), end: toDateKey(addDays(now, daysAfter)) };
 }
 
+export type TaskInventorySelection = {
+  visible: Task[];
+  hiddenGeneratedOpen: number;
+};
+
+/**
+ * Keep the task inventory useful when a daily Rhythm would otherwise create
+ * hundreds of rows. Manual tasks always remain visible; generated work gets a
+ * factual, user-expandable date window.
+ */
+export function selectTaskInventory(
+  tasks: Task[],
+  now = new Date(),
+  occurrenceDays = 30,
+): TaskInventorySelection {
+  const range = dateRangeFrom(now, occurrenceDays, occurrenceDays);
+  const visible = tasks.filter((task) => {
+    if (!task.generated) return true;
+    const date = task.dueDate ?? task.occurrenceDate;
+    return Boolean(date && date >= range.start && date <= range.end);
+  });
+  const hiddenGeneratedOpen = tasks.filter((task) => {
+    if (!task.generated || task.status !== "pending") return false;
+    const date = task.dueDate ?? task.occurrenceDate;
+    return !date || date < range.start || date > range.end;
+  }).length;
+  return { visible, hiddenGeneratedOpen };
+}
+
 export type AiContextTask = {
   id: string;
   title: string;
