@@ -51,7 +51,9 @@ export function Dialog({ open, onClose, title, children, labelledBy, className =
       lastFocused.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
       dialog.showModal();
       requestAnimationFrame(() => {
-        const first = dialog.querySelector<HTMLElement>("[autofocus], input, select, textarea, button, [tabindex]:not([tabindex='-1'])");
+        const first =
+          dialog.querySelector<HTMLElement>("[autofocus], input, select, textarea") ??
+          dialog.querySelector<HTMLElement>("button, [tabindex]:not([tabindex='-1'])");
         first?.focus();
       });
     }
