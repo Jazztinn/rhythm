@@ -10,13 +10,16 @@ import {
   createTaskFromDraft,
   createWorkspaceState,
   generateOccurrences,
+  MAX_OCCURRENCE_RANGE_DAYS,
   migrateWorkspaceData,
+  normalizeRhythmDefinition,
   rhythmOccurrenceId,
   searchTasks,
   seedRhythms,
   seedTasks,
   selectRecommendedTask,
   selectTaskInventory,
+  splitRhythmDefinition,
   summarizeWorkload,
   taskTargetSummary,
   toDateKey,
@@ -206,6 +209,69 @@ test("generates weekly occurrences only on selected local weekdays", () => {
   const rhythm = { ...dailyRhythm, id: "weekly-test", schedule: { frequency: "weekly" as const, weekdays: [1, 3] as RhythmWeekday[] } };
   const items = generateOccurrences([rhythm], [], [], "2026-08-09", "2026-08-16");
   assert.deepEqual(items.map((item) => item.occurrenceDate), ["2026-08-10", "2026-08-12", "2026-08-17"].filter((date) => date <= "2026-08-16"));
+});
+
+test("supports weekdays, biweekly, monthly, and bounded custom intervals", () => {
+  const weekdays = normalizeRhythmDefinition({ ...dailyRhythm, id: "weekdays", schedule: { frequency: "weekdays" } });
+  assert.deepEqual(generateOccurrences([weekdays], [], [], "2026-08-07", "2026-08-11").map((item) => item.occurrenceDate), ["2026-08-07", "2026-08-10", "2026-08-11"]);
+
+  const biweekly = normalizeRhythmDefinition({ ...dailyRhythm, id: "biweekly", startsOn: "2026-08-03", schedule: { frequency: "biweekly", weekdays: [1] } });
+  assert.deepEqual(generateOccurrences([biweekly], [], [], "2026-08-03", "2026-08-24").map((item) => item.occurrenceDate), ["2026-08-03", "2026-08-17"]);
+
+  const monthly = normalizeRhythmDefinition({ ...dailyRhythm, id: "monthly", startsOn: "2026-01-31", schedule: { frequency: "monthly" } });
+  assert.deepEqual(generateOccurrences([monthly], [], [], "2026-01-01", "2026-03-31").map((item) => item.occurrenceDate), ["2026-01-31", "2026-02-28", "2026-03-31"]);
+
+  const custom = normalizeRhythmDefinition({ ...dailyRhythm, id: "custom", startsOn: "2026-08-01", schedule: { frequency: "custom", interval: 3, intervalUnit: "day" } });
+  assert.deepEqual(generateOccurrences([custom], [], [], "2026-08-01", "2026-08-10").map((item) => item.occurrenceDate), ["2026-08-01", "2026-08-04", "2026-08-07", "2026-08-10"]);
+});
+
+test("honors end dates and hard-caps unbounded projection requests", () => {
+  const ended = { ...dailyRhythm, endsOn: "2026-08-03" };
+  assert.deepEqual(generateOccurrences([ended], [], [], "2026-08-01", "2036-08-01").map((item) => item.occurrenceDate), ["2026-08-01", "2026-08-02", "2026-08-03"]);
+  const bounded = generateOccurrences([dailyRhythm], [], [], "2026-08-01", "2099-12-31");
+  assert.equal(bounded.length, MAX_OCCURRENCE_RANGE_DAYS);
+  assert.equal(bounded.at(-1)?.occurrenceDate, toDateKey(addDays(new Date("2026-08-01T12:00:00"), MAX_OCCURRENCE_RANGE_DAYS - 1)));
+});
+
+test("one-off modifications do not alter the recurring definition", () => {
+  const exception = { rhythmId: "daily-test", occurrenceDate: "2026-08-02", kind: "modify" as const, changes: { title: "Read two pages", estimateMinutes: 35, localTime: "19:30" } };
+  const items = generateOccurrences([dailyRhythm], [exception], [], "2026-08-01", "2026-08-03");
+  assert.equal(items[1].title, "Read two pages");
+  assert.equal(items[1].estimateMinutes, 35);
+  assert.equal(items[1].dueTime, "19:30");
+  assert.equal(items[0].title, dailyRhythm.title);
+  assert.equal(items[2].title, dailyRhythm.title);
+});
+
+test("this-and-future split ends the old definition and preserves one entity per era", () => {
+  const changed = { ...dailyRhythm, title: "Read in evening", localTime: "20:00" };
+  const split = splitRhythmDefinition(dailyRhythm, "2026-08-10", changed);
+  assert.ok(split);
+  assert.equal(split.past.endsOn, "2026-08-09");
+  assert.equal(split.future.startsOn, "2026-08-10");
+  assert.equal(split.future.title, "Read in evening");
+  assert.deepEqual(generateOccurrences([split.past, split.future], [], [], "2026-08-09", "2026-08-11").map((item) => [item.rhythmId, item.occurrenceDate]), [
+    ["daily-test", "2026-08-09"],
+    ["daily-test-from-2026-08-10", "2026-08-10"],
+    ["daily-test-from-2026-08-10", "2026-08-11"],
+  ]);
+});
+
+test("migration removes persisted projections but keeps their completion and reschedule state", () => {
+  const projected = { ...generateOccurrences([dailyRhythm], [], [], "2026-08-09", "2026-08-09")[0], status: "completed" as const, dueDate: "2026-08-10" };
+  const old = createWorkspaceState([], [dailyRhythm]);
+  old.tasks = [projected];
+  const migrated = migrateWorkspaceData(old, null, null).state;
+  assert.equal(migrated.tasks.length, 0);
+  assert.deepEqual(migrated.rhythmCompletions.map(({ rhythmId, occurrenceDate }) => ({ rhythmId, occurrenceDate })), [{ rhythmId: "daily-test", occurrenceDate: "2026-08-09" }]);
+  assert.deepEqual(migrated.rhythmExceptions, [{ rhythmId: "daily-test", occurrenceDate: "2026-08-09", kind: "reschedule", replacementDate: "2026-08-10", replacementTime: "08:30" }]);
+});
+
+test("legacy seed rhythm task rows migrate into definitions instead of task totals", () => {
+  const legacyTask = { ...seedTasks[0], id: "weekly-review", title: "Weekly review", source: "rhythm" as const };
+  const state = createWorkspaceState([legacyTask], []);
+  assert.equal(state.tasks.length, 0);
+  assert.equal(state.rhythms.some((rhythm) => rhythm.id === "weekly-review"), true);
 });
 
 test("paused, archived, skipped, and completed occurrences classify correctly", () => {

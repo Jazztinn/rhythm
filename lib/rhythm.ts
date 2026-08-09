@@ -1,12 +1,16 @@
 export type TaskStatus = "pending" | "completed";
 export type TaskPriority = "low" | "medium" | "high";
 export type TaskSource = "task" | "calendar" | "slack" | "rhythm";
-export type RhythmFrequency = "daily" | "weekly";
+export type RhythmFrequency = "daily" | "weekdays" | "weekly" | "biweekly" | "monthly" | "custom";
 export type RhythmWeekday = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+export type RhythmIntervalUnit = "day" | "week" | "month";
 
 export type RhythmSchedule = {
   frequency: RhythmFrequency;
   weekdays?: RhythmWeekday[];
+  /** Used by custom schedules. Kept bounded during normalization. */
+  interval?: number;
+  intervalUnit?: RhythmIntervalUnit;
 };
 
 export type Task = {
@@ -34,6 +38,7 @@ export type RhythmDefinition = {
   note: string;
   schedule: RhythmSchedule;
   startsOn: string;
+  endsOn?: string;
   localTime?: string;
   icon: "sun" | "waves" | "moon" | "orbit";
   tone: "lime" | "violet" | "peach";
@@ -49,9 +54,19 @@ export type RhythmDefinition = {
 export type RhythmException = {
   rhythmId: string;
   occurrenceDate: string;
-  kind: "skip" | "reschedule";
+  kind: "skip" | "reschedule" | "modify";
   replacementDate?: string;
   replacementTime?: string;
+  changes?: RhythmOccurrenceChanges;
+};
+
+export type RhythmOccurrenceChanges = {
+  title?: string;
+  note?: string;
+  project?: string;
+  estimateMinutes?: number;
+  priority?: TaskPriority;
+  localTime?: string;
 };
 
 export type RhythmCompletion = {
@@ -334,9 +349,55 @@ function completionList(value: RhythmCompletion[] | Record<string, string[]>) {
   return Array.isArray(value) ? value : recordsToCompletions(value);
 }
 
+export const MAX_OCCURRENCE_RANGE_DAYS = 370;
+export const MAX_GENERATED_OCCURRENCES = 2000;
+
+function daysBetween(start: string, end: string) {
+  return Math.round((dateFromKey(end).getTime() - dateFromKey(start).getTime()) / 86_400_000);
+}
+
+function monthsBetween(start: string, end: string) {
+  const first = dateFromKey(start);
+  const second = dateFromKey(end);
+  return (second.getFullYear() - first.getFullYear()) * 12 + second.getMonth() - first.getMonth();
+}
+
+function startOfWeek(dateKey: string) {
+  const date = dateFromKey(dateKey);
+  const distanceFromMonday = (date.getDay() + 6) % 7;
+  return toDateKey(addDays(date, -distanceFromMonday));
+}
+
+function monthlyAnchorMatches(startsOn: string, dateKey: string, interval: number) {
+  const monthDistance = monthsBetween(startsOn, dateKey);
+  if (monthDistance < 0 || monthDistance % interval !== 0) return false;
+  const start = dateFromKey(startsOn);
+  const date = dateFromKey(dateKey);
+  const finalDay = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+  return date.getDate() === Math.min(start.getDate(), finalDay);
+}
+
 function followsSchedule(definition: RhythmDefinition, dateKey: string) {
-  if (definition.schedule.frequency === "daily") return true;
-  return (definition.schedule.weekdays ?? [1]).includes(dateFromKey(dateKey).getDay() as RhythmWeekday);
+  if (dateKey < definition.startsOn || (definition.endsOn && dateKey > definition.endsOn)) return false;
+  const { frequency } = definition.schedule;
+  const weekday = dateFromKey(dateKey).getDay() as RhythmWeekday;
+  if (frequency === "daily") return true;
+  if (frequency === "weekdays") return weekday >= 1 && weekday <= 5;
+  if (frequency === "monthly") return monthlyAnchorMatches(definition.startsOn, dateKey, 1);
+  if (frequency === "weekly" || frequency === "biweekly") {
+    const weekDistance = Math.floor(daysBetween(startOfWeek(definition.startsOn), startOfWeek(dateKey)) / 7);
+    const interval = frequency === "biweekly" ? 2 : 1;
+    return weekDistance >= 0 && weekDistance % interval === 0 &&
+      (definition.schedule.weekdays ?? [dateFromKey(definition.startsOn).getDay() as RhythmWeekday]).includes(weekday);
+  }
+  const interval = definition.schedule.interval ?? 1;
+  if (definition.schedule.intervalUnit === "week") {
+    const weekDistance = Math.floor(daysBetween(startOfWeek(definition.startsOn), startOfWeek(dateKey)) / 7);
+    return weekDistance >= 0 && weekDistance % interval === 0 &&
+      (definition.schedule.weekdays ?? [dateFromKey(definition.startsOn).getDay() as RhythmWeekday]).includes(weekday);
+  }
+  if (definition.schedule.intervalUnit === "month") return monthlyAnchorMatches(definition.startsOn, dateKey, interval);
+  return daysBetween(definition.startsOn, dateKey) % interval === 0;
 }
 
 export function generateOccurrences(
@@ -347,46 +408,50 @@ export function generateOccurrences(
   end: string,
 ): Task[] {
   if (!isDateKey(start) || !isDateKey(end) || start > end) return [];
-  const exceptionByKey = new Map(exceptionList(exceptions).map((exception) => [`${exception.rhythmId}:${exception.occurrenceDate}`, exception]));
+  const boundedEnd = [end, toDateKey(addDays(dateFromKey(start), MAX_OCCURRENCE_RANGE_DAYS - 1))].sort()[0];
+  const normalizedExceptions = exceptionList(exceptions);
+  const exceptionByKey = new Map(normalizedExceptions.map((exception) => [`${exception.rhythmId}:${exception.occurrenceDate}`, exception]));
   const completedKeys = new Set(completionList(completions).map((completion) => `${completion.rhythmId}:${completion.occurrenceDate}`));
   const result: Task[] = [];
 
   for (const rawDefinition of definitions) {
+    if (result.length >= MAX_GENERATED_OCCURRENCES) break;
     const definition = normalizeRhythmDefinition(rawDefinition);
     if (definition.paused || definition.archived) continue;
     const generationStart = definition.startsOn > start ? definition.startsOn : start;
-    if (generationStart > end) continue;
+    if (generationStart > boundedEnd || (definition.endsOn && generationStart > definition.endsOn)) continue;
     const occurrenceDates = new Set<string>();
-    for (let occurrenceDate = generationStart; occurrenceDate <= end; occurrenceDate = nextDateKey(occurrenceDate)) occurrenceDates.add(occurrenceDate);
-    for (const exception of exceptionList(exceptions)) {
-      if (exception.rhythmId === definition.id && exception.kind === "reschedule" && exception.occurrenceDate >= definition.startsOn && exception.replacementDate && exception.replacementDate >= start && exception.replacementDate <= end) occurrenceDates.add(exception.occurrenceDate);
+    for (let occurrenceDate = generationStart; occurrenceDate <= boundedEnd; occurrenceDate = nextDateKey(occurrenceDate)) occurrenceDates.add(occurrenceDate);
+    for (const exception of normalizedExceptions) {
+      if (exception.rhythmId === definition.id && exception.kind === "reschedule" && exception.occurrenceDate >= definition.startsOn && exception.replacementDate && exception.replacementDate >= start && exception.replacementDate <= boundedEnd) occurrenceDates.add(exception.occurrenceDate);
     }
     for (const occurrenceDate of [...occurrenceDates].sort()) {
+      if (result.length >= MAX_GENERATED_OCCURRENCES) break;
       if (!isDateKey(occurrenceDate)) continue;
-      if (occurrenceDate < definition.startsOn) continue;
       if (!followsSchedule(definition, occurrenceDate)) continue;
       const exception = exceptionByKey.get(`${definition.id}:${occurrenceDate}`);
       if (exception?.kind === "skip") continue;
       const dueDate = exception?.kind === "reschedule" && exception.replacementDate
         ? exception.replacementDate
         : occurrenceDate;
-      if (dueDate < start || dueDate > end) continue;
+      if (dueDate < start || dueDate > boundedEnd) continue;
       const dueTime = exception?.kind === "reschedule" && exception.replacementTime !== undefined
         ? exception.replacementTime
-        : definition.localTime;
+        : exception?.changes?.localTime ?? definition.localTime;
+      const changes = exception?.changes;
       result.push({
         id: rhythmOccurrenceId(definition.id, occurrenceDate),
-        title: definition.title,
-        project: definition.project?.trim() || "Personal",
+        title: changes?.title?.trim() || definition.title,
+        project: changes?.project?.trim() || definition.project?.trim() || "Personal",
         dueLabel: formatTaskDue(dueDate, dueTime ?? ""),
-        estimateMinutes: clampEstimateMinutes(definition.estimateMinutes ?? 25),
+        estimateMinutes: clampEstimateMinutes(changes?.estimateMinutes ?? definition.estimateMinutes ?? 25),
         status: completedKeys.has(`${definition.id}:${occurrenceDate}`) ? "completed" : "pending",
-        priority: definition.priority ?? "medium",
+        priority: changes?.priority ?? definition.priority ?? "medium",
         source: "rhythm",
         later: false,
         dueDate,
         dueTime,
-        note: definition.note,
+        note: changes?.note ?? definition.note,
         rhythmId: definition.id,
         occurrenceDate,
         generated: true,
@@ -399,10 +464,32 @@ export function generateOccurrences(
 export function getNextRhythmOccurrence(definition: RhythmDefinition, start = toDateKey(new Date())) {
   const normalized = normalizeRhythmDefinition(definition);
   if (normalized.paused || normalized.archived || !isDateKey(start)) return null;
-  for (let date = start, count = 0; count < 370; date = nextDateKey(date), count += 1) {
+  const firstDate = start < normalized.startsOn ? normalized.startsOn : start;
+  for (let date = firstDate, count = 0; count < MAX_OCCURRENCE_RANGE_DAYS; date = nextDateKey(date), count += 1) {
     if (followsSchedule(normalized, date)) return date;
   }
   return null;
+}
+
+/** Split one recurring entity without rewriting any earlier occurrence. */
+export function splitRhythmDefinition(
+  definition: RhythmDefinition,
+  fromDate: string,
+  future: RhythmDefinition,
+  futureId = `${definition.id}-from-${fromDate}`,
+) {
+  const current = normalizeRhythmDefinition(definition);
+  if (!isDateKey(fromDate) || fromDate <= current.startsOn || (current.endsOn && fromDate > current.endsOn)) return null;
+  const pastEndsOn = toDateKey(addDays(dateFromKey(fromDate), -1));
+  const past = normalizeRhythmDefinition({ ...current, endsOn: pastEndsOn });
+  const next = normalizeRhythmDefinition({
+    ...future,
+    id: futureId,
+    startsOn: fromDate,
+    ...(current.endsOn ? { endsOn: current.endsOn } : {}),
+    archived: false,
+  });
+  return { past, future: next };
 }
 
 export function formatTaskDue(dateKey: string, time: string, now = new Date()) {
@@ -523,35 +610,21 @@ export const seedTasks: Task[] = [
     source: "task",
     later: false,
   },
-  {
-    id: "weekly-review",
-    title: "Weekly review",
-    project: "Personal rhythm",
-    dueLabel: "Sunday",
-    estimateMinutes: 25,
-    status: "pending",
-    priority: "low",
-    source: "rhythm",
-    later: true,
-  },
-  {
-    id: "leetcode-session",
-    title: "LeetCode practice",
-    project: "Growth",
-    dueLabel: "This weekend",
-    estimateMinutes: 45,
-    status: "pending",
-    priority: "low",
-    source: "rhythm",
-    later: true,
-  },
 ];
 
 export const seedRhythms: RhythmDefinition[] = [
   { id: "morning", title: "Start softly", note: "Water, sunlight, no inbox", schedule: { frequency: "daily" }, startsOn: toDateKey(new Date()), localTime: "08:00", icon: "sun", tone: "lime", project: "Personal", estimateMinutes: 15, priority: "low" },
   { id: "focus", title: "Protect one deep block", note: "One important thing, fully present", schedule: { frequency: "daily" }, startsOn: toDateKey(new Date()), localTime: "10:00", icon: "waves", tone: "violet", project: "Personal", estimateMinutes: 45, priority: "medium" },
   { id: "shutdown", title: "Close the loops", note: "Review, reset, step away", schedule: { frequency: "daily" }, startsOn: toDateKey(new Date()), localTime: "20:30", icon: "moon", tone: "peach", project: "Personal", estimateMinutes: 20, priority: "low" },
+  { id: "weekly-review", title: "Weekly review", note: "Close loops and shape the week ahead", schedule: { frequency: "weekly", weekdays: [0] }, startsOn: toDateKey(new Date()), localTime: "19:00", icon: "orbit", tone: "violet", project: "Personal", estimateMinutes: 25, priority: "low" },
+  { id: "leetcode-session", title: "LeetCode practice", note: "One focused problem", schedule: { frequency: "weekly", weekdays: [6] }, startsOn: toDateKey(new Date()), icon: "waves", tone: "lime", project: "Growth", estimateMinutes: 45, priority: "low" },
 ];
+
+const legacyRhythmTaskIds = new Set(["weekly-review", "leetcode-session"]);
+
+function isLegacyRhythmTask(task: Task) {
+  return task.source === "rhythm" && !task.rhythmId && legacyRhythmTaskIds.has(task.id);
+}
 
 export const WORKSPACE_STORAGE_KEY = "rhythm.workspace.v3";
 export const LEGACY_TASKS_STORAGE_KEY = "rhythm.tasks.v1";
@@ -586,9 +659,15 @@ function normalizeWeekdays(value: unknown, fallback: RhythmWeekday[] = [1]) {
 export function normalizeRhythmDefinition(value: RhythmDefinition | Record<string, unknown>): RhythmDefinition {
   const raw = value as Record<string, unknown>;
   const defaultStartsOn = toDateKey(new Date());
+  const startsOn = typeof raw.startsOn === "string" && isDateKey(raw.startsOn) ? raw.startsOn : defaultStartsOn;
   const legacyTime = typeof raw.time === "string" ? raw.time : undefined;
   const rawSchedule = isRecord(raw.schedule) ? raw.schedule : undefined;
-  const frequency = rawSchedule?.frequency === "weekly" ? "weekly" : "daily";
+  const frequencies: RhythmFrequency[] = ["daily", "weekdays", "weekly", "biweekly", "monthly", "custom"];
+  const frequency = frequencies.includes(rawSchedule?.frequency as RhythmFrequency) ? rawSchedule?.frequency as RhythmFrequency : "daily";
+  const intervalUnits: RhythmIntervalUnit[] = ["day", "week", "month"];
+  const intervalUnit = intervalUnits.includes(rawSchedule?.intervalUnit as RhythmIntervalUnit) ? rawSchedule?.intervalUnit as RhythmIntervalUnit : "day";
+  const interval = Math.min(365, Math.max(1, Math.round(typeof rawSchedule?.interval === "number" ? rawSchedule.interval : 1)));
+  const anchorWeekday = dateFromKey(startsOn).getDay() as RhythmWeekday;
   const localTime = typeof raw.localTime === "string" ? raw.localTime : legacyTime;
   return {
     id: typeof raw.id === "string" ? raw.id : `rhythm-${Date.now()}`,
@@ -596,9 +675,13 @@ export function normalizeRhythmDefinition(value: RhythmDefinition | Record<strin
     note: typeof raw.note === "string" ? raw.note : "A small promise worth keeping",
     schedule: {
       frequency,
-      ...(frequency === "weekly" ? { weekdays: normalizeWeekdays(rawSchedule?.weekdays) } : {}),
+      ...(["weekly", "biweekly"].includes(frequency) || (frequency === "custom" && intervalUnit === "week")
+        ? { weekdays: normalizeWeekdays(rawSchedule?.weekdays, [anchorWeekday]) }
+        : {}),
+      ...(frequency === "custom" ? { interval, intervalUnit } : {}),
     },
-    startsOn: typeof raw.startsOn === "string" && isDateKey(raw.startsOn) ? raw.startsOn : defaultStartsOn,
+    startsOn,
+    ...(typeof raw.endsOn === "string" && isDateKey(raw.endsOn) && raw.endsOn >= startsOn ? { endsOn: raw.endsOn } : {}),
     ...(localTime ? { localTime } : {}),
     icon: ["sun", "waves", "moon", "orbit"].includes(raw.icon as string) ? raw.icon as RhythmDefinition["icon"] : "orbit",
     tone: ["lime", "violet", "peach"].includes(raw.tone as string) ? raw.tone as RhythmDefinition["tone"] : "lime",
@@ -618,10 +701,17 @@ export function createWorkspaceState(
   tasks: Task[] = cloneTasks(seedTasks),
   rhythms: RhythmDefinition[] = cloneRhythms(seedRhythms),
 ): WorkspaceStateV3 {
+  const migratedRhythms = [...rhythms];
+  for (const task of tasks) {
+    if (!isLegacyRhythmTask(task) || migratedRhythms.some((rhythm) => rhythm.id === task.id)) continue;
+    const definition = seedRhythms.find((rhythm) => rhythm.id === task.id);
+    if (definition) migratedRhythms.push(definition);
+  }
   return {
     version: 3,
-    tasks: cloneTasks(tasks),
-    rhythms: cloneRhythms(rhythms),
+    // Occurrences are projections, never durable task rows.
+    tasks: cloneTasks(tasks.filter((task) => !task.generated && !isLegacyRhythmTask(task))),
+    rhythms: cloneRhythms(migratedRhythms),
     exceptions: {},
     completions: {},
     rhythmExceptions: [],
@@ -645,20 +735,22 @@ export function isTask(value: unknown): value is Task {
 
 export function isRhythmDefinition(value: unknown): value is RhythmDefinition {
   if (!isRecord(value)) return false;
-  const hasSchedule = isRecord(value.schedule) && (value.schedule.frequency === "daily" || value.schedule.frequency === "weekly");
+  const hasSchedule = isRecord(value.schedule) && ["daily", "weekdays", "weekly", "biweekly", "monthly", "custom"].includes(value.schedule.frequency as string);
   const hasLegacyTime = typeof value.time === "string";
   return typeof value.id === "string" && typeof value.title === "string" &&
     typeof value.note === "string" && (hasSchedule || hasLegacyTime) &&
     (value.startsOn === undefined || (typeof value.startsOn === "string" && isDateKey(value.startsOn))) &&
+    (value.endsOn === undefined || (typeof value.endsOn === "string" && isDateKey(value.endsOn))) &&
     ["sun", "waves", "moon", "orbit"].includes(value.icon as string) &&
     ["lime", "violet", "peach"].includes(value.tone as string);
 }
 
 function isRhythmException(value: unknown): value is RhythmException {
   return isRecord(value) && typeof value.rhythmId === "string" && typeof value.occurrenceDate === "string" &&
-    (value.kind === "skip" || value.kind === "reschedule") &&
+    (value.kind === "skip" || value.kind === "reschedule" || value.kind === "modify") &&
     (value.replacementDate === undefined || typeof value.replacementDate === "string") &&
-    (value.replacementTime === undefined || typeof value.replacementTime === "string");
+    (value.replacementTime === undefined || typeof value.replacementTime === "string") &&
+    (value.changes === undefined || isRecord(value.changes));
 }
 
 function isRhythmCompletion(value: unknown): value is RhythmCompletion {
@@ -709,21 +801,39 @@ function completionsToRecord(completions: RhythmCompletion[]) {
 }
 
 function normalizeWorkspaceState(value: WorkspaceStateV3): WorkspaceStateV3 {
-  const rhythmExceptions = Array.isArray((value as Partial<WorkspaceStateV3>).rhythmExceptions)
+  const normalizedRhythms = cloneRhythms(value.rhythms);
+  for (const task of value.tasks) {
+    if (!isLegacyRhythmTask(task) || normalizedRhythms.some((rhythm) => rhythm.id === task.id)) continue;
+    const definition = seedRhythms.find((rhythm) => rhythm.id === task.id);
+    if (definition) normalizedRhythms.push(normalizeRhythmDefinition(definition));
+  }
+  let rhythmExceptions = Array.isArray((value as Partial<WorkspaceStateV3>).rhythmExceptions)
     ? cloneExceptions(value.rhythmExceptions)
     : recordsToExceptions(value.exceptions);
-  const rhythmCompletions = Array.isArray((value as Partial<WorkspaceStateV3>).rhythmCompletions)
+  let rhythmCompletions = Array.isArray((value as Partial<WorkspaceStateV3>).rhythmCompletions)
     ? cloneCompletions(value.rhythmCompletions)
     : recordsToCompletions(value.completions);
+  for (const task of value.tasks) {
+    if (!task.generated || !task.rhythmId || !task.occurrenceDate || !isDateKey(task.occurrenceDate)) continue;
+    const keyMatches = (item: { rhythmId: string; occurrenceDate: string }) => item.rhythmId === task.rhythmId && item.occurrenceDate === task.occurrenceDate;
+    if (task.status === "completed" && !rhythmCompletions.some(keyMatches)) {
+      rhythmCompletions = [...rhythmCompletions, { rhythmId: task.rhythmId, occurrenceDate: task.occurrenceDate }];
+    }
+    if (task.dueDate && task.dueDate !== task.occurrenceDate && !rhythmExceptions.some(keyMatches)) {
+      rhythmExceptions = [...rhythmExceptions, { rhythmId: task.rhythmId, occurrenceDate: task.occurrenceDate, kind: "reschedule", replacementDate: task.dueDate, ...(task.dueTime ? { replacementTime: task.dueTime } : {}) }];
+    }
+  }
   return {
     ...value,
-    rhythms: cloneRhythms(value.rhythms),
+    tasks: cloneTasks(value.tasks.filter((task) => !task.generated && !isLegacyRhythmTask(task))),
+    rhythms: normalizedRhythms,
     exceptions: cloneRecord(value.exceptions),
     completions: { ...cloneRecord(value.completions), ...completionsToRecord(rhythmCompletions) },
     rhythmExceptions,
     rhythmCompletions,
     history: value.history.map((snapshot) => ({
       ...snapshot,
+      tasks: cloneTasks(snapshot.tasks.filter((task) => !task.generated && !isLegacyRhythmTask(task))),
       rhythms: cloneRhythms(snapshot.rhythms),
       exceptions: cloneRecord(snapshot.exceptions),
       completions: cloneRecord(snapshot.completions),

@@ -18,12 +18,14 @@ import {
   resolveTaskDate,
   seedRhythms,
   seedTasks,
+  splitRhythmDefinition,
   undoWorkspace,
   WORKSPACE_STORAGE_KEY,
   type AssistantAction,
   type RhythmDefinition,
   type RhythmException,
   type RhythmCompletion,
+  type RhythmOccurrenceChanges,
   type Task,
   type TaskDraft,
   type WorkspaceMigrationStatus,
@@ -64,6 +66,7 @@ type RhythmContextValue = {
   toggleRhythm: (id: string) => void;
   createRhythm: (rhythm: RhythmDefinition) => void;
   updateRhythm: (id: string, rhythm: RhythmDefinition) => void;
+  updateRhythmFuture: (id: string, fromDate: string, rhythm: RhythmDefinition) => void;
   pauseRhythm: (id: string) => void;
   resumeRhythm: (id: string) => void;
   archiveRhythm: (id: string) => void;
@@ -72,6 +75,7 @@ type RhythmContextValue = {
   uncompleteOccurrence: (occurrence: OccurrenceRef) => void;
   skipOccurrence: (occurrence: OccurrenceRef) => void;
   rescheduleOccurrence: (occurrence: OccurrenceRef, replacementDate: string, replacementTime?: string) => void;
+  editOccurrence: (occurrence: OccurrenceRef, changes: RhythmOccurrenceChanges) => void;
   skipNextOccurrence: (rhythmId: string, fromDate?: string) => void;
   undoToast: UndoToast | null;
   dismissUndoToast: () => void;
@@ -247,6 +251,25 @@ export function RhythmProvider({ children }: { children: React.ReactNode }) {
     commitTransaction("Edited rhythm", (current) => ({ ...current, rhythms: current.rhythms.map((item) => item.id === id ? normalizeRhythmDefinition(rhythm) : item) }));
   }, [commitTransaction]);
 
+  const updateRhythmFuture = useCallback((id: string, fromDate: string, rhythm: RhythmDefinition) => {
+    commitTransaction("Edited this and future rhythm occurrences", (current) => {
+      const existing = current.rhythms.find((item) => item.id === id);
+      if (!existing) return current;
+      if (fromDate <= existing.startsOn) {
+        return { ...current, rhythms: current.rhythms.map((item) => item.id === id ? normalizeRhythmDefinition({ ...rhythm, id, startsOn: existing.startsOn }) : item) };
+      }
+      const split = splitRhythmDefinition(existing, fromDate, rhythm);
+      if (!split) return current;
+      return {
+        ...current,
+        rhythms: [...current.rhythms.filter((item) => item.id !== id), split.past, split.future],
+        rhythmExceptions: current.rhythmExceptions.map((item) => item.rhythmId === id && item.occurrenceDate >= fromDate ? { ...item, rhythmId: split.future.id } : item),
+        rhythmCompletions: current.rhythmCompletions.map((item) => item.rhythmId === id && item.occurrenceDate >= fromDate ? { ...item, rhythmId: split.future.id } : item),
+        completions: Object.fromEntries(Object.entries(current.completions).map(([date, ids]) => [date, date >= fromDate ? ids.map((item) => item === id ? split.future.id : item) : ids])),
+      };
+    });
+  }, [commitTransaction]);
+
   const pauseRhythm = useCallback((id: string) => {
     commitTransaction("Paused rhythm", (current) => ({ ...current, rhythms: current.rhythms.map((rhythm) => rhythm.id === id ? { ...rhythm, paused: true } : rhythm) }));
   }, [commitTransaction]);
@@ -300,8 +323,18 @@ export function RhythmProvider({ children }: { children: React.ReactNode }) {
   const rescheduleOccurrence = useCallback((occurrence: OccurrenceRef, replacementDate: string, replacementTime?: string) => {
     updateOccurrence("Rescheduled rhythm occurrence", occurrence, (current) => ({
       ...current,
-      rhythmExceptions: [...current.rhythmExceptions.filter((item) => !(item.rhythmId === occurrence.rhythmId && item.occurrenceDate === occurrence.occurrenceDate)), { ...occurrence, kind: "reschedule", replacementDate, ...(replacementTime ? { replacementTime } : {}) }],
+      rhythmExceptions: [...current.rhythmExceptions.filter((item) => !(item.rhythmId === occurrence.rhythmId && item.occurrenceDate === occurrence.occurrenceDate)), { ...occurrence, kind: "reschedule", replacementDate, ...(replacementTime ? { replacementTime } : {}), changes: current.rhythmExceptions.find((item) => item.rhythmId === occurrence.rhythmId && item.occurrenceDate === occurrence.occurrenceDate)?.changes }],
     }));
+  }, [updateOccurrence]);
+
+  const editOccurrence = useCallback((occurrence: OccurrenceRef, changes: RhythmOccurrenceChanges) => {
+    updateOccurrence("Edited rhythm occurrence", occurrence, (current) => {
+      const existing = current.rhythmExceptions.find((item) => item.rhythmId === occurrence.rhythmId && item.occurrenceDate === occurrence.occurrenceDate);
+      const next: RhythmException = existing
+        ? { ...existing, changes }
+        : { ...occurrence, kind: "modify", changes };
+      return { ...current, rhythmExceptions: [...current.rhythmExceptions.filter((item) => !(item.rhythmId === occurrence.rhythmId && item.occurrenceDate === occurrence.occurrenceDate)), next] };
+    });
   }, [updateOccurrence]);
 
   const skipNextOccurrence = useCallback((rhythmId: string, fromDate = dateRangeFrom(new Date(), 0, 0).start) => {
@@ -335,6 +368,7 @@ export function RhythmProvider({ children }: { children: React.ReactNode }) {
     toggleRhythm,
     createRhythm,
     updateRhythm,
+    updateRhythmFuture,
     pauseRhythm,
     resumeRhythm,
     archiveRhythm,
@@ -343,11 +377,12 @@ export function RhythmProvider({ children }: { children: React.ReactNode }) {
     uncompleteOccurrence,
     skipOccurrence,
     rescheduleOccurrence,
+    editOccurrence,
     skipNextOccurrence,
     undoToast,
     dismissUndoToast,
     recoverStorage,
-  }), [applyActions, archiveRhythm, canUndo, commitTransaction, completeOccurrence, createRhythm, createTask, deleteTask, deleteRhythm, dismissUndoToast, getWorkItems, hydrated, migration, pauseRhythm, recoverStorage, restoreStarterData, rescheduleOccurrence, resumeRhythm, skipNextOccurrence, skipOccurrence, storageNotice, toggleRhythm, toggleTask, undoLast, undoToast, uncompleteOccurrence, updateRhythm, updateTask, workspace.completions, workspace.rhythmCompletions, workspace.rhythmExceptions, workspace.rhythms, workspace.tasks]);
+  }), [applyActions, archiveRhythm, canUndo, commitTransaction, completeOccurrence, createRhythm, createTask, deleteTask, deleteRhythm, dismissUndoToast, editOccurrence, getWorkItems, hydrated, migration, pauseRhythm, recoverStorage, restoreStarterData, rescheduleOccurrence, resumeRhythm, skipNextOccurrence, skipOccurrence, storageNotice, toggleRhythm, toggleTask, undoLast, undoToast, uncompleteOccurrence, updateRhythm, updateRhythmFuture, updateTask, workspace.completions, workspace.rhythmCompletions, workspace.rhythmExceptions, workspace.rhythms, workspace.tasks]);
 
   return <RhythmContext.Provider value={value}>{children}</RhythmContext.Provider>;
 }
