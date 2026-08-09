@@ -16,7 +16,8 @@ Final motion/responsive/polish review for the `codex/motion-final-polish` base. 
 | Completed/history initial rendering | FIXED | Completed rows initially render in a bounded batch with an explicit Show 40 more action; open manual tasks are not capped by that control. |
 | Embedded Ask Rhythm entry points | FIXED | Today and Tasks link to `/chat` with contextual prefilled prompts. `/chat` already reads the prompt query parameter and no proactive message is sent. |
 | Factual microcopy and semantic surface roles | PARTIALLY FIXED | “Live tasks” and “Live reflection” were replaced with factual labels; task/capability and provider surfaces use lime, peach, violet, or neutral glass roles. Some legacy copy remains outside this touched scope and needs product copy review. |
-| Accessibility final pass | PARTIALLY FIXED | Focus rings, labelled controls, semantic time/list/status roles, reduced motion, and 44px targets are present; supporting calendar/task text was raised to 11px desktop and 12px mobile. A full assistive-technology audit is still outside automated evidence. |
+| Supporting text minimums | FIXED | A final scoped cascade in `app/globals.css` sets visible supporting UI text to 11px desktop and 12px below 768px across profile/search, chat proposals/context/composer, task editors, calendar, rhythms, integrations, Slack, badges, and section metadata. Decorative glyphs and hidden text are excluded; wrap rules preserve content at narrow widths. |
+| Accessibility final pass | PARTIALLY FIXED | Focus rings, labelled controls, semantic time/list/status roles, reduced motion, 44px targets, and the supporting-text floor are present. A full assistive-technology audit is still outside automated evidence. |
 | Performance cleanup | FIXED | Removed the unused GSAP dependency and replaced page/orb loops with CSS entry motion and visibility-aware orbit motion. |
 
 ## Intentional exclusions
@@ -25,7 +26,7 @@ The following are intentionally not implemented in this phase: reliable backgrou
 
 ## Verification evidence
 
-The local browser smoke covered `/`, `/tasks`, `/calendar`, `/rhythms`, `/chat`, and `/settings` at 320×568 and 834×1112, plus Today at 1440×1000 and 390×844. `document.body.scrollWidth` did not exceed the viewport width in those checks. Calendar rendered seven agenda day sections at 390px, the desktop calendar grid was hidden below 768px, and the five mobile nav columns were equal width. Search opened with its combobox focused and Escape returned focus to Search Rhythm after the 180ms exit. No browser console errors or warnings were captured. The in-app browser did not expose a reduced-motion emulation control, so reduced-motion verification is source/CSS-based rather than runtime-emulated.
+The local browser smoke covered `/`, `/tasks`, `/calendar`, `/rhythms`, `/chat`, and `/settings` at 320×568 and 834×1112, plus Today at 1440×1000 and 390×844; the typography correction was rechecked at 320×568, 390×844, and 834×1112. `document.body.scrollWidth` did not exceed the viewport width in those checks. Calendar rendered seven agenda day sections at 390px, the desktop calendar grid was hidden below 768px, and the five mobile nav columns were equal width. Search opened with its combobox focused and Escape returned focus to Search Rhythm after the 180ms exit. No browser console errors or warnings were captured. The in-app browser did not expose a reduced-motion emulation control, so reduced-motion verification is source/CSS-based rather than runtime-emulated.
 
 ## Open risks
 
