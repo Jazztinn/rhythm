@@ -118,6 +118,8 @@ test("uses Gemini structured JSON and returns only safe task proposals", async (
   assert.equal(sent?.model, "test-model");
   assert.equal(sent?.config.responseMimeType, "application/json");
   assert.match(sent?.config.systemInstruction ?? "", /untrusted context/);
+  assert.match(sent?.config.systemInstruction ?? "", /Never claim Calendar availability/);
+  assert.match(sent?.config.systemInstruction ?? "", /Observe → Infer → Ask → Confirm → Use/);
   assert.deepEqual((await response.json()).proposals.map((proposal: { action: unknown }) => proposal.action), [
     { type: "reschedule_task", taskId: "monday-meeting", title: null, project: null, dueLabel: "Friday morning", estimateMinutes: null },
   ]);

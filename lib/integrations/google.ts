@@ -1,6 +1,7 @@
 import { classifyProviderError, classifyProviderResponse, failure, success, type IntegrationResponse } from "./contracts.ts";
 import type { ProviderSession } from "./session.ts";
 import { validateManagedEventPayload, type ValidManagedEvent, type ValidManagedPatch } from "./validation.ts";
+import { MAX_PROJECTED_PROVIDER_EVENTS } from "./calendar-context.ts";
 
 const GOOGLE_API = "https://www.googleapis.com/calendar/v3";
 const GOOGLE_TOKEN = "https://oauth2.googleapis.com/token";
@@ -61,14 +62,14 @@ export async function listGoogleEvents(token: string, calendarIds: string[], tim
   const ids = calendarIds.length ? calendarIds : ["primary"];
   try {
     const groups = await Promise.all(ids.map(async (calendarId) => {
-      const params = new URLSearchParams({ timeMin, timeMax, singleEvents: "true", orderBy: "startTime", showDeleted: "false", maxResults: "2500" });
+      const params = new URLSearchParams({ timeMin, timeMax, singleEvents: "true", orderBy: "startTime", showDeleted: "false", maxResults: "250" });
       const response = await request<{ items?: Array<{ id: string; summary?: string; description?: string; start?: { dateTime?: string; date?: string }; end?: { dateTime?: string; date?: string }; htmlLink?: string; status?: string; extendedProperties?: { private?: Record<string, string> } }> }>(token, `/calendars/${encodeURIComponent(calendarId)}/events?${params}`, {}, fetchImpl);
       if (!response.data) return response as IntegrationResponse<GoogleEvent[]>;
       return success((response.data.items ?? []).map((event) => ({ id: event.id, calendarId, summary: event.summary ?? "Untitled event", description: event.description, start: event.start?.dateTime ?? `${event.start?.date ?? ""}T00:00:00`, end: event.end?.dateTime ?? `${event.end?.date ?? ""}T23:59:00`, htmlLink: event.htmlLink, status: event.status, rhythmManaged: event.extendedProperties?.private?.rhythmManaged === "true", taskReference: event.extendedProperties?.private?.rhythmTaskReference })));
     }));
     const failed = groups.find((group) => group.error);
     if (failed) return failed;
-    return success(groups.flatMap((group) => group.data ?? []));
+    return success(groups.flatMap((group) => group.data ?? []).slice(0, MAX_PROJECTED_PROVIDER_EVENTS));
   } catch (error) { return errorResponse<GoogleEvent[]>(error); }
 }
 

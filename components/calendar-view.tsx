@@ -48,7 +48,7 @@ export function CalendarView() {
   }, []);
   const weekStart = useMemo(() => addDays(startOfWeek(now), weekOffset * 7), [now, weekOffset]);
   const days = useMemo(() => Array.from({ length: 7 }, (_, index) => addDays(weekStart, index)), [weekStart]);
-  const workItems = useMemo(() => getWorkItems(dateRangeFrom(now, 365, 365)), [getWorkItems, now]);
+  const workItems = useMemo(() => getWorkItems(dateRangeFrom(weekStart, 0, 6)), [getWorkItems, weekStart]);
 
   const weekTasks = useMemo(() => {
     const dayKeys = new Set(days.map(toDateKey));
@@ -81,7 +81,7 @@ export function CalendarView() {
   return (
     <div className="workspace-view calendar-workspace" ref={root}>
       <header className="workspace-header" data-workspace-reveal>
-        <div><p className="eyebrow">Your time, at a glance</p><h1>Calendar</h1><p className="page-subtitle">Every dated task appears here automatically.</p></div>
+        <div><p className="eyebrow">Your time, at a glance</p><h1>Calendar</h1><p className="page-subtitle">Tasks and Rhythms for these dates, with Calendar context when connected.</p></div>
         <span className="weather"><CalendarDays size={15} /> Local task view</span>
       </header>
       <section className="calendar-summary" data-workspace-reveal>
@@ -108,7 +108,7 @@ export function CalendarView() {
         <div className="section-heading compact"><div><span className="section-kicker"><CalendarDays size={14} /> Agenda</span><h2>This week</h2></div><span>{weekTasks.length} local task{weekTasks.length === 1 ? "" : "s"}</span></div>
         <div className="calendar-agenda-days">{days.map((day) => { const key = toDateKey(day); const dayTasks = weekTasks.filter((task) => resolveTaskDate(task, now) === key).sort((a, b) => (a.dueTime ?? "99:99").localeCompare(b.dueTime ?? "99:99")); return <section key={key} className="calendar-agenda-day" aria-labelledby={`agenda-${key}`}><h3 id={`agenda-${key}`}><span>{new Intl.DateTimeFormat("en-US", { weekday: "long" }).format(day)}</span><time dateTime={key}>{new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(day)}</time></h3>{dayTasks.length ? dayTasks.map((task) => <Link href="/tasks" key={task.id}><time>{task.dueTime ?? "Flexible"}</time><span><strong>{task.title}</strong><small>{task.generated ? "Rhythm occurrence · " : ""}{task.estimateMinutes} min{task.status === "completed" ? " · Complete" : ""}</small></span></Link>) : <p>No local tasks.</p>}</section>; })}</div>
       </section>
-      <GoogleCalendarPanel start={days[0].toISOString()} end={addDays(days[6], 1).toISOString()} tasks={weekTasks} />
+      <GoogleCalendarPanel start={dateFromKey(toDateKey(days[0]), "00:00").toISOString()} end={dateFromKey(toDateKey(addDays(days[6], 1)), "00:00").toISOString()} tasks={weekTasks} />
       <aside className="calendar-task-strip" data-workspace-reveal><span>{unscheduled.length} need a time</span>{unscheduled.slice(0, 4).map((task) => <Link href="/tasks" key={task.id}><article><i /><div><strong>{task.title}</strong><small>{task.generated ? "From Rhythm · " : ""}{task.estimateMinutes} min · {task.project}</small></div></article></Link>)}</aside>
       {occurrenceTask?.rhythmId && occurrenceTask.occurrenceDate ? <OccurrenceActionSheet task={occurrenceTask} onClose={() => setOccurrenceTask(null)} onComplete={() => { completeOccurrence({ rhythmId: occurrenceTask.rhythmId!, occurrenceDate: occurrenceTask.occurrenceDate! }); setOccurrenceTask(null); }} onUncomplete={() => { uncompleteOccurrence({ rhythmId: occurrenceTask.rhythmId!, occurrenceDate: occurrenceTask.occurrenceDate! }); setOccurrenceTask(null); }} onSkip={() => { skipOccurrence({ rhythmId: occurrenceTask.rhythmId!, occurrenceDate: occurrenceTask.occurrenceDate! }); setOccurrenceTask(null); }} onReschedule={(date, time) => { rescheduleOccurrence({ rhythmId: occurrenceTask.rhythmId!, occurrenceDate: occurrenceTask.occurrenceDate! }, date, time); setOccurrenceTask(null); }} /> : null}
     </div>

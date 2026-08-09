@@ -33,6 +33,12 @@ function actionLabel(action: AssistantAction) {
   return `Move the task to ${action.dueLabel}`;
 }
 
+function calmDuration(minutes: number) {
+  if (minutes < 45) return `About ${minutes} minutes`;
+  const hours = Math.round(minutes / 30) / 2;
+  return `About ${hours === 1 ? "an hour" : `${hours} hours`}`;
+}
+
 function ProposalEditor({ proposal, workItems, onClose, onSave }: { proposal: AiActionProposal; workItems: Task[]; onClose: () => void; onSave: (proposal: AiActionProposal) => void }) {
   const action = proposal.action;
   const initialTarget = action.taskId ? workItems.find((task) => task.id === action.taskId) : undefined;
@@ -84,16 +90,16 @@ function ProposalEditor({ proposal, workItems, onClose, onSave }: { proposal: Ai
   );
 }
 
-function ProposalCard({ proposal, onApprove, onEdit, onCancel }: { proposal: AiActionProposal; onApprove: () => void; onEdit: () => void; onCancel: () => void }) {
+function ProposalCard({ proposal, batch, onApprove, onEdit, onCancel }: { proposal: AiActionProposal; batch: boolean; onApprove: () => void; onEdit: () => void; onCancel: () => void }) {
   if (proposal.status === "cancelled") return <div className="ai-proposal ai-proposal--muted"><X size={15} /> Proposal cancelled. Nothing changed.</div>;
   if (proposal.status === "approved") return <div className="ai-proposal ai-proposal--approved"><Check size={15} /> Approved: {actionLabel(proposal.action)}</div>;
   if (proposal.status === "blocked") return <div className="ai-proposal ai-proposal--blocked"><X size={15} /> No change made. {proposal.resolution ?? "This proposal could not be validated against the current workspace."}</div>;
   return <div className="ai-proposal">
-    <div className="ai-proposal__heading"><span className="section-kicker"><Sparkles size={13} /> Suggested change</span><span>{Math.round(proposal.confidence * 100)}% confidence</span></div>
+    <div className="ai-proposal__heading"><span className="section-kicker"><Sparkles size={13} /> Suggested change</span></div>
     <strong>{actionLabel(proposal.action)}</strong>
     <p className="ai-proposal__target">Target: {proposal.targetSummary}</p>
-    <p className="ai-proposal__reason">{proposal.reason}</p>
-    <div className="ai-proposal__actions"><Button type="button" variant="primary" onClick={onApprove}>Approve</Button><Button type="button" onClick={onEdit}><Pencil size={14} /> Edit</Button><Button type="button" variant="ghost" onClick={onCancel}>Cancel</Button></div>
+    <p className="ai-proposal__reason">Why this appeared: {proposal.reason}</p>
+    <div className="ai-proposal__actions"><Button type="button" variant="primary" onClick={onApprove}>Approve</Button><Button type="button" onClick={onEdit}><Pencil size={14} /> Edit</Button><Button type="button" variant="ghost" onClick={onCancel}>{batch ? "Exclude" : "Cancel"}</Button></div>
   </div>;
 }
 
@@ -131,7 +137,10 @@ export function ChatView() {
   }, [hydrated, messages, isThinking]);
 
   const pendingTasks = useMemo(() => tasks.filter((task) => task.status === "pending" && !task.later), [tasks]);
-  const workItems = useMemo(() => getWorkItems(dateRangeFrom(new Date(), 365, 365)), [getWorkItems]);
+  const workItems = useMemo(() => {
+    const relevant = getWorkItems(dateRangeFrom(new Date(), 30, 90));
+    return [...new Map([...tasks, ...relevant].map((task) => [task.id, task])).values()];
+  }, [getWorkItems, tasks]);
   const aiContextSource = useMemo(() => [
     ...tasks,
     ...getWorkItems(dateRangeFrom(new Date(), 30, 90)).filter((task) => task.generated),
@@ -194,9 +203,9 @@ export function ChatView() {
   return <div className="chat-view" ref={root}>
     <header className="chat-header" data-chat-reveal><div><span className="section-kicker"><Sparkles size={15} /> Personal chief of staff</span><h1>Ask Rhythm</h1></div><div className="chat-header-actions">{canUndo ? <button className="soft-button" onClick={undo}><RotateCcw size={15} /> Undo last change</button> : null}<button className="soft-button" onClick={clearChat}><Plus size={16} /> New chat</button></div></header>
     <div className="chat-layout"><section className="chat-panel" data-chat-reveal><div className="chat-orb" aria-hidden="true" /><div className="chat-thread" aria-live="polite">
-      {messages.length === 0 ? <div className="chat-empty"><span className="assistant-mark"><WandSparkles size={22} /></span><p>Hello Jazz</p><h2>What can I <strong>help you</strong> with?</h2><div className="prompt-grid">{prompts.slice(0, 2).map((prompt) => <button key={prompt} onClick={() => void submitMessage(prompt)}>{prompt}<ArrowUp size={15} /></button>)}</div></div> : <div className="messages">{messages.map((message) => <article className={`message ${message.role}`} key={message.id}>{message.role === "assistant" ? <span className="message-avatar">R</span> : null}<div><p>{message.content}</p>{message.clarifications?.map((clarification) => <StatusMessage key={clarification}>{clarification}</StatusMessage>)}{message.proposals?.length ? <div className="ai-proposals">{message.proposals.length > 1 && message.proposals.some((proposal) => proposal.status === "pending" || proposal.status === "edited") ? <div className="ai-proposals__batch"><span>Review these together as one change</span><Button type="button" variant="primary" onClick={() => approve(message.id)}>Approve all</Button></div> : null}{message.proposals.map((proposal) => <ProposalCard key={proposal.id} proposal={proposal} onApprove={() => approve(message.id, [proposal.id])} onEdit={() => edit(message.id, proposal)} onCancel={() => cancel(message.id, proposal.id)} />)}</div> : null}{message.receipt ? <div className="ai-receipt"><Check size={14} /><div><strong>Receipt</strong>{message.receipt.changed.map((item) => <span key={item}>Changed: {item}</span>)}{message.receipt.unchanged.map((item) => <span key={item}>Unchanged: {item}</span>)}{message.receipt.undoAvailable ? <span>Undo is available above.</span> : null}</div></div> : null}</div></article>)}{isThinking ? <article className="message assistant is-thinking"><span className="message-avatar">R</span><div><i /><i /><i /></div></article> : null}{error ? <div className="chat-error"><span>{error}</span><button onClick={() => void submitMessage(messages.at(-1)?.content ?? "")}>Retry <RefreshCw size={13} /></button></div> : null}<div ref={endRef} /></div>}
+      {messages.length === 0 ? <div className="chat-empty"><span className="assistant-mark"><WandSparkles size={22} /></span><p>Hello Jazz</p><h2>What can I <strong>help you</strong> with?</h2><div className="prompt-grid">{prompts.slice(0, 2).map((prompt) => <button key={prompt} onClick={() => void submitMessage(prompt)}>{prompt}<ArrowUp size={15} /></button>)}</div></div> : <div className="messages">{messages.map((message) => { const batch = (message.proposals?.length ?? 0) > 1; return <article className={`message ${message.role}`} key={message.id}>{message.role === "assistant" ? <span className="message-avatar">R</span> : null}<div><p>{message.content}</p>{message.clarifications?.map((clarification) => <StatusMessage key={clarification}>{clarification}</StatusMessage>)}{message.proposals?.length ? <div className="ai-proposals">{batch && message.proposals.some((proposal) => proposal.status === "pending" || proposal.status === "edited") ? <div className="ai-proposals__batch"><span>Review each change. Exclude any you do not want.</span><Button type="button" variant="primary" onClick={() => approve(message.id)}>Approve selected</Button></div> : null}{message.proposals.map((proposal) => <ProposalCard key={proposal.id} proposal={proposal} batch={batch} onApprove={() => approve(message.id, [proposal.id])} onEdit={() => edit(message.id, proposal)} onCancel={() => cancel(message.id, proposal.id)} />)}</div> : null}{message.receipt ? <div className="ai-receipt"><Check size={14} /><div><strong>Receipt</strong>{message.receipt.changed.map((item) => <span key={item}>Changed: {item}</span>)}{message.receipt.unchanged.map((item) => <span key={item}>Unchanged: {item}</span>)}{message.receipt.undoAvailable && canUndo ? <Button type="button" onClick={undo}><RotateCcw size={14} /> Undo this change</Button> : null}</div></div> : null}</div></article>; })}{isThinking ? <article className="message assistant is-thinking"><span className="message-avatar">R</span><div><i /><i /><i /></div></article> : null}{error ? <div className="chat-error"><span>{error}</span><button onClick={() => void submitMessage(messages.at(-1)?.content ?? "")}>Retry <RefreshCw size={13} /></button></div> : null}<div ref={endRef} /></div>}
     </div><div className="chat-composer-wrap">{messages.length > 0 ? <div className="suggestion-row">{suggestions.slice(0, 3).map((suggestion) => <button key={suggestion} onClick={() => setInput(suggestion)}>{suggestion}</button>)}</div> : null}<form className="chat-composer" onSubmit={handleSubmit}><input value={input} onChange={(event) => setInput(event.target.value)} placeholder="Ask Rhythm, or change a task…" aria-label="Message Rhythm" disabled={isThinking} maxLength={1200} /><button type="submit" aria-label="Send message" disabled={!input.trim() || isThinking}><ArrowUp size={19} /></button></form><p className="composer-note">Rhythm suggests proposals first. Nothing changes until you approve.</p></div></section>
-      <aside className="context-panel" data-chat-reveal><div className="context-top"><span className="section-kicker">Today&apos;s context</span><strong>{pendingTasks.length} things left</strong></div><div className="context-task-list">{pendingTasks.slice(0, 4).map((task) => <article key={task.id}><i /><div><strong>{task.title}</strong><span>{task.project}</span></div><small>{task.dueLabel}</small></article>)}</div><div className="context-window"><Clock3 size={17} /><div><span>Open task time</span><strong>{pendingTasks.reduce((sum, task) => sum + task.estimateMinutes, 0)} minutes</strong></div></div><div className="context-note"><CornerDownRight size={16} /><p>Ask Rhythm can suggest local changes. You stay in control.</p></div></aside>
+      <aside className="context-panel" data-chat-reveal><div className="context-top"><span className="section-kicker">Today&apos;s context</span><strong>{pendingTasks.length} things left</strong></div><div className="context-task-list">{pendingTasks.slice(0, 4).map((task) => <article key={task.id}><i /><div><strong>{task.title}</strong><span>{task.project}</span></div><small>{task.dueLabel}</small></article>)}</div><div className="context-window"><Clock3 size={17} /><div><span>Based on your task list</span><strong>{calmDuration(pendingTasks.reduce((sum, task) => sum + task.estimateMinutes, 0))}</strong></div></div><div className="context-note"><CornerDownRight size={16} /><p>Ask Rhythm can suggest local changes. You stay in control.</p></div></aside>
     </div>{editing ? <ProposalEditor proposal={editing.proposal} workItems={workItems} onClose={() => setEditing(null)} onSave={saveEdit} /> : null}
   </div>;
 }

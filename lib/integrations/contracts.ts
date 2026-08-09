@@ -15,6 +15,26 @@ export type IntegrationErrorCode = ProviderErrorCode | IntegrationRequestErrorCo
 export type IntegrationStatus = ProviderErrorCode | "connected" | IntegrationRequestErrorCode;
 export type IntegrationProvider = "google" | "slack";
 
+export type ProviderSyncState =
+  | "not_configured"
+  | "syncing"
+  | "sync_failed"
+  | "disconnected"
+  | "permission_revoked"
+  | "offline"
+  | "refreshed"
+  | "conflict";
+
+export function providerSyncState(status: IntegrationStatus, options: { syncing?: boolean; hasConflict?: boolean } = {}): ProviderSyncState {
+  if (options.syncing) return "syncing";
+  if (status === "not_configured") return "not_configured";
+  if (status === "not_connected") return "disconnected";
+  if (status === "permission_denied" || status === "token_expired") return "permission_revoked";
+  if (status === "offline") return "offline";
+  if (status !== "connected") return "sync_failed";
+  return options.hasConflict ? "conflict" : "refreshed";
+}
+
 export type ProviderError = {
   code: ProviderErrorCode;
   message: string;
@@ -73,4 +93,12 @@ export const providerMessages: Record<ProviderErrorCode, string> = {
 
 export function responseStatus(response: Response): ProviderErrorCode | null {
   return response.ok ? null : classifyProviderResponse(response.status);
+}
+
+export function integrationHttpStatus(status: IntegrationStatus): number {
+  if (status === "invalid_request") return 400;
+  if (status === "not_connected" || status === "token_expired") return 401;
+  if (status === "permission_denied") return 403;
+  if (status === "rate_limited") return 429;
+  return status === "connected" ? 200 : 503;
 }

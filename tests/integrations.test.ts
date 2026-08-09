@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { decryptCookiePayload, encryptCookiePayload, CookiePayloadTooLargeError } from "../lib/integrations/crypto.ts";
-import { classifyProviderResponse, failure, success } from "../lib/integrations/contracts.ts";
+import { classifyProviderResponse, failure, integrationHttpStatus, providerSyncState, success } from "../lib/integrations/contracts.ts";
 import { isProviderConfigured, isValidCookieSecret } from "../lib/integrations/config.ts";
 import { constantTimeEqual, createPkceChallenge } from "../lib/integrations/oauth.ts";
 import { createManagedGoogleEvent, deleteManagedGoogleEvent, listGoogleEvents, updateManagedGoogleEvent } from "../lib/integrations/google.ts";
@@ -9,6 +9,9 @@ import { listSlackChannels, listSlackMessages } from "../lib/integrations/slack.
 import { validateManagedEventId, validateManagedEventPayload } from "../lib/integrations/validation.ts";
 import { findCalendarConflicts } from "../lib/integrations/conflicts.ts";
 import { seedTasks } from "../lib/rhythm.ts";
+import { MAX_CALENDAR_RANGE_DAYS, suggestCalendarSlots, validateVisibleCalendarRange } from "../lib/integrations/calendar-context.ts";
+import { identifySlackCommitment } from "../lib/integrations/slack-commitments.ts";
+import { buildContextualNotification, isQuietTime } from "../lib/integrations/notifications.ts";
 
 const secret = Buffer.alloc(32, 7).toString("base64");
 
@@ -32,6 +35,43 @@ test("normalizes expected provider errors and responses", () => {
   assert.equal(classifyProviderResponse(429), "rate_limited");
   assert.deepEqual(success({ ok: true }), { status: "connected", data: { ok: true }, error: null });
   assert.equal(failure("offline", "offline", true).error?.retryable, true);
+  assert.equal(integrationHttpStatus("permission_denied"), 403);
+  assert.equal(integrationHttpStatus("rate_limited"), 429);
+  assert.equal(providerSyncState("not_connected"), "disconnected");
+  assert.equal(providerSyncState("token_expired"), "permission_revoked");
+  assert.equal(providerSyncState("provider_unavailable"), "sync_failed");
+  assert.equal(providerSyncState("connected", { syncing: true }), "syncing");
+  assert.equal(providerSyncState("connected", { hasConflict: true }), "conflict");
+});
+
+test("bounds Calendar projection and suggests slots only from visible connected context", () => {
+  const range = validateVisibleCalendarRange("2026-08-10T00:00:00Z", "2026-08-17T00:00:00Z");
+  assert.equal(range.status, "connected");
+  assert.equal(MAX_CALENDAR_RANGE_DAYS, 62);
+  const unbounded = validateVisibleCalendarRange("2026-01-01T00:00:00Z", "2026-12-31T00:00:00Z");
+  assert.equal(unbounded.status, "invalid_request");
+  const slots = suggestCalendarSlots([{ id: "meeting", calendarId: "primary", summary: "Meeting", start: "2026-08-10T09:00:00Z", end: "2026-08-10T10:00:00Z" }], "2026-08-10T08:00:00Z", "2026-08-10T12:00:00Z", 60, 2);
+  assert.equal(slots.length, 2);
+  assert.equal(slots[0].evidence, "google_calendar");
+  assert.notEqual(slots[0].start, "2026-08-10T09:00:00.000Z");
+});
+
+test("Slack commitment context remains a proposal, not an automatic task", () => {
+  const base = { id: "C1:1", channelId: "C1", user: "U1", timestamp: "1" };
+  assert.equal(identifySlackCommitment({ ...base, text: "Good morning everyone" }), null);
+  const commitment = identifySlackCommitment({ ...base, text: "Could you review the membership sheet by Friday?" });
+  assert.equal(commitment?.sourceMessageId, "C1:1");
+  assert.match(commitment?.reason ?? "", /Review before creating/i);
+});
+
+test("notifications use confirmed context only and respect quiet hours", () => {
+  const now = new Date("2026-08-10T19:00:00");
+  assert.equal(isQuietTime(now, { start: "18:00", end: "08:00" }), true);
+  assert.equal(buildContextualNotification({ now, quietHours: { start: "18:00", end: "08:00" }, confirmedPatterns: [], allowReassurance: true }), null);
+  const unconfirmed = buildContextualNotification({ now, confirmedPatterns: [{ status: "still_learning", category: "Admin", windowStart: "18:00", windowEnd: "20:00" }], openItem: { title: "Reply", category: "Admin", urgent: false } });
+  assert.equal(unconfirmed, null);
+  const confirmed = buildContextualNotification({ now, confirmedPatterns: [{ status: "confirmed", category: "Admin", windowStart: "18:00", windowEnd: "20:00" }], openItem: { title: "Reply", category: "Admin", urgent: false } });
+  assert.match(confirmed?.reason ?? "", /confirmed/i);
 });
 
 test("requires a valid base64 32-byte cookie secret before a provider is configured", () => {
