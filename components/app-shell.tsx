@@ -121,6 +121,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     navigationRef.current?.querySelector<HTMLElement>(".nav-item.is-active")?.scrollIntoView({ block: "nearest", inline: "center" });
   }, [pathname]);
 
+  if (pathname === "/login") return <>{children}</>;
+
   function openTask(task: Task) {
     setSearchOpen(false);
     if (task.generated) setOccurrenceTask(task);
@@ -152,7 +154,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <span className="section-kicker">Local workspace</span>
           <strong>Jazz Tinn</strong>
           <p>{tasks.length - completed ? `${tasks.length - completed} tasks open` : "You’re clear for now"}</p>
-          <div><Link href="/settings" onClick={() => setProfileOpen(false)}>Settings & connections</Link><Link href="/tasks" onClick={() => setProfileOpen(false)}>Manage tasks</Link><ConfirmAction label="Reset workspace" title="Reset workspace?" description="This clears the current local tasks and rhythms. Your current workspace will be kept as an undo snapshot." confirmLabel="Reset workspace" onConfirm={() => { recoverStorage(); setProfileOpen(false); }} /></div>
+          <div><Link href="/settings" onClick={() => setProfileOpen(false)}>Settings & connections</Link><Link href="/tasks" onClick={() => setProfileOpen(false)}>Manage tasks</Link><ConfirmAction label="Reset workspace" title="Reset workspace?" description="This clears the current local tasks and rhythms. Your current workspace will be kept as an undo snapshot." confirmLabel="Reset workspace" onConfirm={() => { recoverStorage(); setProfileOpen(false); }} /><form action="/api/auth/logout" method="post"><button type="submit">Sign out</button></form></div>
         </div> : null}
       </div>
     </aside>
