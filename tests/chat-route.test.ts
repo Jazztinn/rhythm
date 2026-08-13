@@ -61,6 +61,28 @@ test("uses the local assistant without a Gemini key", async () => {
   assert.equal(JSON.stringify(seedTasks), before);
 });
 
+test("local task creation requires a real title and stays a task proposal", async () => {
+  const prior = process.env.GEMINI_API_KEY;
+  delete process.env.GEMINI_API_KEY;
+  const incomplete = await POST(request({ ...payload, messages: [{ role: "user", content: "Create a task for tomorrow" }] }));
+  const incompleteResult = await incomplete.json();
+  assert.equal(incompleteResult.proposals.length, 0);
+  assert.match(incompleteResult.message, /what should the task be called/i);
+
+  const complete = await POST(request({ ...payload, messages: [{ role: "user", content: "Create a task to submit the report tomorrow" }] }));
+  const completeResult = await complete.json();
+  assert.equal(completeResult.proposals[0].action.type, "create_task");
+  assert.equal(completeResult.proposals[0].action.title, "submit the report");
+  assert.match(completeResult.message, /prepared a task/i);
+
+  const later = await POST(request({ ...payload, messages: [{ role: "user", content: "Create a task for me later to do my LeetCode practice" }] }));
+  const laterResult = await later.json();
+  assert.equal(laterResult.proposals[0].action.title, "do my LeetCode practice");
+  assert.equal(laterResult.proposals[0].action.dueLabel, "Later");
+  assert.equal(laterResult.proposals[0].action.later, true);
+  if (prior) process.env.GEMINI_API_KEY = prior;
+});
+
 test("rejects malformed and oversized route payloads before provider call", async () => {
   process.env.GEMINI_API_KEY = "test-key";
   let called = 0;

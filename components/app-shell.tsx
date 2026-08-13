@@ -86,6 +86,7 @@ function TimezoneChangeNotice() {
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const chatMode = pathname.startsWith("/chat");
   const navigationRef = useRef<HTMLElement>(null);
   const searchTriggerRef = useRef<HTMLButtonElement>(null);
   const { tasks, hydrated, storageNotice, undoToast, undoLast, dismissUndoToast, recoverStorage, updateTask, deleteTask, completeOccurrence, uncompleteOccurrence, skipOccurrence, rescheduleOccurrence } = useRhythm();
@@ -131,15 +132,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     setEditorTask(null);
   }
 
-  return <div className="app-frame">
+  return <div className={`app-frame ${chatMode ? "is-chat-mode" : ""}`}>
     <a className="skip-link" href="#main-content">Skip to main content</a>
-    <aside className="sidebar" aria-label="Primary navigation">
+    <aside className="sidebar" aria-label="Primary navigation" inert={chatMode ? true : undefined}>
       <Link href="/" className="brand" aria-label="Rhythm home" title="Rhythm home"><span className="brand-mark">R</span><span className="brand-name">rhythm</span></Link>
       <nav className="nav-stack" ref={navigationRef} aria-label="Main">
         {navigation.map((item) => {
           const Icon = item.icon;
           const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
-          return <Link key={item.label} href={item.href} className={`nav-item ${active ? "is-active" : ""}`} aria-current={active ? "page" : undefined} title={item.label}>
+          return <Link key={item.label} href={item.href} transitionTypes={item.href === "/chat" ? ["chat-enter"] : undefined} className={`nav-item ${active ? "is-active" : ""}`} aria-current={active ? "page" : undefined} title={item.label}>
             <Icon size={19} strokeWidth={1.7} aria-hidden="true" /><span>{item.label}</span>
           </Link>;
         })}
@@ -151,16 +152,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <span className="section-kicker">Local workspace</span>
           <strong>Jazz Tinn</strong>
           <p>{tasks.length - completed ? `${tasks.length - completed} tasks open` : "You’re clear for now"}</p>
-          <div><Link href="/settings" onClick={() => setProfileOpen(false)}>Settings & connections</Link><Link href="/tasks" onClick={() => setProfileOpen(false)}>Manage tasks</Link><ConfirmAction label="Restore starter data" title="Restore starter data?" description="This replaces the current local tasks and rhythms with the starter workspace. Your current workspace will be kept as an undo snapshot." confirmLabel="Restore starter data" onConfirm={() => { recoverStorage(); setProfileOpen(false); }} /></div>
+          <div><Link href="/settings" onClick={() => setProfileOpen(false)}>Settings & connections</Link><Link href="/tasks" onClick={() => setProfileOpen(false)}>Manage tasks</Link><ConfirmAction label="Reset workspace" title="Reset workspace?" description="This clears the current local tasks and rhythms. Your current workspace will be kept as an undo snapshot." confirmLabel="Reset workspace" onConfirm={() => { recoverStorage(); setProfileOpen(false); }} /></div>
         </div> : null}
       </div>
     </aside>
     <main id="main-content" className="app-content">
       <TimezoneChangeNotice />
-      {hydrated ? <ViewTransition default="page-crossfade">{children}</ViewTransition> : <div className="loading-shell" role="status" aria-live="polite"><div className="loading-shell__bar" /><p>Loading your local workspace…</p></div>}
+      {hydrated ? <ViewTransition
+        enter={{ "chat-enter": "chat-enter", "chat-exit": "chat-exit", default: "page-crossfade" }}
+        exit={{ "chat-enter": "chat-enter", "chat-exit": "chat-exit", default: "page-crossfade" }}
+      >{children}</ViewTransition> : <div className="loading-shell" role="status" aria-live="polite"><div className="loading-shell__bar" /><p>Loading your local workspace…</p></div>}
     </main>
     <div className="grain" aria-hidden="true" />
-    {storageNotice ? <div className="global-notice"><StatusMessage tone="error"><span>{storageNotice}</span><ConfirmAction label="Restore starter data" title="Replace unreadable local data?" description="This creates a fresh starter workspace and replaces the unreadable local payload. The unreadable payload will not be silently removed until you confirm." confirmLabel="Replace local data" tone="danger" onConfirm={recoverStorage} /></StatusMessage></div> : null}
+    {storageNotice ? <div className="global-notice"><StatusMessage tone="error"><span>{storageNotice}</span><ConfirmAction label="Reset workspace" title="Replace unreadable local data?" description="This creates a blank workspace and replaces the unreadable local payload. The unreadable payload will not be silently removed until you confirm." confirmLabel="Replace local data" tone="danger" onConfirm={recoverStorage} /></StatusMessage></div> : null}
     {undoToast ? <Toast label={undoToast.label} onUndo={undoLast} onDismiss={dismissUndoToast} /> : null}
     <SearchDialog open={searchOpen} onClose={() => setSearchOpen(false)} onOpenTask={openTask} />
     {editorTask ? <TaskEditor key={editorTask.id} task={editorTask} onClose={() => setEditorTask(null)} onSave={saveTask} onDelete={() => { deleteTask(editorTask.id); setEditorTask(null); }} /> : null}

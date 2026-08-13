@@ -152,7 +152,14 @@ test("keeps corrupt V3 data recoverable instead of treating it as empty", () => 
   const result = migrateWorkspaceData({ version: 3, tasks: "not an array" }, null, null);
   assert.equal(result.status, "corrupt");
   assert.equal(result.recoverable, true);
-  assert.equal(result.state.tasks.length, seedTasks.length);
+  assert.equal(result.state.tasks.length, 0);
+  assert.equal(result.state.rhythms.length, 0);
+});
+
+test("fresh and recoverable workspaces contain no demo placeholders", () => {
+  const fresh = createWorkspaceState();
+  assert.deepEqual(fresh.tasks, []);
+  assert.deepEqual(fresh.rhythms, []);
 });
 
 test("preserves labeled undo history through serialization", () => {

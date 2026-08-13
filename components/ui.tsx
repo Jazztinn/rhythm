@@ -19,9 +19,10 @@ type DialogProps = {
   children: ReactNode;
   labelledBy?: string;
   className?: string;
+  hideHeading?: boolean;
 };
 
-export function Dialog({ open, onClose, title, children, labelledBy, className = "" }: DialogProps) {
+export function Dialog({ open, onClose, title, children, labelledBy, className = "", hideHeading = false }: DialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const lastFocused = useRef<HTMLElement | null>(null);
   const closeTimer = useRef<number | null>(null);
@@ -98,11 +99,11 @@ export function Dialog({ open, onClose, title, children, labelledBy, className =
   return (
     <dialog ref={dialogRef} className={`ui-dialog ${closing ? "is-closing" : ""} ${className}`.trim()} aria-labelledby={labelledBy ?? titleId} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); closeDialog(); } }} onMouseDown={(event) => { if (event.target === event.currentTarget) closeDialog(); }}>
       <div className="ui-dialog__surface">
-        <div className="ui-dialog__heading">
+        {!hideHeading ? <div className="ui-dialog__heading">
           <h2 id={labelledBy ?? titleId}>{title}</h2>
           <Button type="button" variant="ghost" iconOnly aria-label={`Close ${title}`} onClick={closeDialog}><X size={17} aria-hidden="true" /></Button>
-        </div>
-        {children}
+        </div> : null}
+        <div className="ui-dialog__body">{children}</div>
       </div>
     </dialog>
   );

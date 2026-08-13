@@ -16,9 +16,8 @@ import {
   migrateWorkspaceData,
   normalizeRhythmDefinition,
   resolveTaskDate,
-  seedRhythms,
-  seedTasks,
   splitRhythmDefinition,
+  toDateKey,
   undoWorkspace,
   WORKSPACE_STORAGE_KEY,
   type AssistantAction,
@@ -94,7 +93,7 @@ function parseStoredValue(raw: string | null): { value: unknown; invalid: boolea
 }
 
 export function RhythmProvider({ children }: { children: React.ReactNode }) {
-  const [workspace, setWorkspace] = useState<WorkspaceStateV3>(() => createWorkspaceState(seedTasks, seedRhythms));
+  const [workspace, setWorkspace] = useState<WorkspaceStateV3>(() => createWorkspaceState());
   const [hydrated, setHydrated] = useState(false);
   const [migration, setMigration] = useState<MigrationStatus>({ status: "fresh", recoverable: false, didMigrate: false });
   const [storageNotice, setStorageNotice] = useState<string | null>(null);
@@ -216,7 +215,7 @@ export function RhythmProvider({ children }: { children: React.ReactNode }) {
     setWorkspace((current) => {
       const next = applyWorkspaceTransaction(current, "Restored starter data", (state) => ({
         ...createWorkspaceState(),
-        settings: { ...state.settings, starterDataAvailable: true },
+        settings: { ...state.settings, starterDataAvailable: false },
       }));
       showUndoToast("Restored starter data");
       return next;
@@ -232,7 +231,10 @@ export function RhythmProvider({ children }: { children: React.ReactNode }) {
       const date = resolveTaskDate(task);
       return !date || (date >= range.start && date <= range.end);
     })());
-    return [...manualTasks, ...generateOccurrences(workspace.rhythms, workspace.rhythmExceptions, workspace.rhythmCompletions, range.start, range.end)];
+    const today = toDateKey(new Date());
+    const rhythmOccurrences = generateOccurrences(workspace.rhythms, workspace.rhythmExceptions, workspace.rhythmCompletions, range.start, range.end)
+      .filter((task) => task.status === "completed" || (task.dueDate ?? task.occurrenceDate ?? today) >= today);
+    return [...manualTasks, ...rhythmOccurrences];
   }, [workspace.rhythmCompletions, workspace.rhythmExceptions, workspace.rhythms, workspace.tasks]);
 
   const toggleRhythm = useCallback((id: string) => {

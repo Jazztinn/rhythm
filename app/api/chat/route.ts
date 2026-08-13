@@ -1,6 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { z } from "zod";
 import {
+  hasMeaningfulTaskTitle,
   taskTargetSummary,
   type AiActionProposal,
   type AssistantAction,
@@ -116,9 +117,23 @@ function taskMatches(message: string, tasks: Task[]) {
 }
 
 function dueFromMessage(message: string) {
+  if (/\blater\b/i.test(message)) return "Later";
   const match = message.match(/\b(?:to|for)\s+((?:today|tonight|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday)(?:\s+(?:morning|afternoon|evening|night))?)/i);
   if (!match) return null;
   return match[1].replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function taskTitleFromMessage(message: string) {
+  const afterTask = message.replace(/^.*?\btask\b/i, "");
+  const withoutDuration = afterTask.replace(/\b\d{1,3}\s*(?:-|\s)?minutes?\b/gi, "");
+  const withoutSchedule = withoutDuration.replace(/\s+(?:for|on)?\s*(?:today|tonight|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday)(?:\s+(?:morning|afternoon|evening|night))?[.!?]*$/i, "");
+  const title = withoutSchedule
+    .replace(/^\s*for\s+me\s+/i, "")
+    .replace(/^\s*later\s+/i, "")
+    .replace(/^\s*(?:to|for|called|named)\s+/i, "")
+    .replace(/[.!?]+$/, "")
+    .trim();
+  return title && !/^(?:for|to|today|tonight|tomorrow|new task)$/i.test(title) ? title : null;
 }
 
 function localProposal(action: AssistantAction, target: Task | undefined, reason: string): AiActionProposal {
@@ -140,12 +155,11 @@ function localReply(payload: ChatRequest) {
 
   if (/\b(create|add|make)\b/.test(lower) && /\btask\b/.test(lower)) {
     const estimate = Number(message.match(/(\d{1,3})\s*(?:-|\s)?minutes?/i)?.[1] ?? 25);
-    const rawTitle = message.match(/\btask\s+(?:to\s+)?(.+?)(?:\s+(?:today|tonight|tomorrow|on\s+\w+|for\s+\w+))?[.!?]?$/i)?.[1]
-      ?.replace(/^for\s+/, "").replace(/\b\d{1,3}\s*(?:-|\s)?minutes?\b/gi, "").trim();
-    const title = rawTitle || "New task";
+    const title = taskTitleFromMessage(message);
+    if (!title) return { message: "What should the task be called?", suggestions, proposals: [], clarifications: ["Add a clear task name, for example: “Create a task to submit the report tomorrow.”"] };
     const dueLabel = dueFromMessage(message) || (/tonight/i.test(message) ? "Tonight" : "Today");
-    const action: AssistantAction = { type: "create_task", taskId: null, title, project: "Personal", dueLabel, estimateMinutes: Math.min(Math.max(estimate, 5), 480) };
-    return { message: `I prepared a task proposal for your review.`, suggestions, proposals: [localProposal(action, undefined, "You asked Rhythm to create this local task.")] };
+    const action: AssistantAction = { type: "create_task", taskId: null, title, project: "Personal", dueLabel, estimateMinutes: Math.min(Math.max(estimate, 5), 480), ...(dueLabel === "Later" ? { later: true } : {}) };
+    return { message: `I prepared a task for your review.`, suggestions, proposals: [localProposal(action, undefined, "Based on your request to create a task.")] };
   }
 
   if (/\b(complete|finish|done|mark)\b/.test(lower)) {
@@ -221,6 +235,10 @@ function sanitizeProposalsDetailed(proposals: ProviderProposal[], tasks: Task[])
       continue;
     }
     const target = raw.action.taskId ? taskById.get(raw.action.taskId) : undefined;
+    if (raw.action.type === "create_task" && !hasMeaningfulTaskTitle(raw.action.title)) {
+      clarifications.push("Add a clear task name before creating it.");
+      continue;
+    }
     if (raw.action.type !== "create_task" && !target) {
       clarifications.push("That task is no longer available. Choose the current task before approving a change.");
       continue;

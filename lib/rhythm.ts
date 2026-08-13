@@ -220,6 +220,10 @@ export function clampEstimateMinutes(value: number) {
   return Math.min(Math.max(value, 5), 480);
 }
 
+export function hasMeaningfulTaskTitle(title: string) {
+  return title.trim().length >= 2 && !/^(?:for|to|task|new task|today|tonight|tomorrow)$/i.test(title.trim());
+}
+
 export function createLocalTaskId() {
   return `task-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 }
@@ -621,6 +625,9 @@ export const seedRhythms: RhythmDefinition[] = [
   { id: "leetcode-session", title: "LeetCode practice", note: "One focused problem", schedule: { frequency: "weekly", weekdays: [6] }, startsOn: toDateKey(new Date()), icon: "waves", tone: "lime", project: "Growth", estimateMinutes: 45, priority: "low" },
 ];
 
+const starterTaskIds = new Set(seedTasks.map((task) => task.id));
+const starterRhythmIds = new Set(seedRhythms.map((rhythm) => rhythm.id));
+
 const legacyRhythmTaskIds = new Set(["weekly-review", "leetcode-session"]);
 
 function isLegacyRhythmTask(task: Task) {
@@ -695,12 +702,12 @@ export function normalizeRhythmDefinition(value: RhythmDefinition | Record<strin
 }
 
 function defaultWorkspaceSettings(): WorkspaceSettings {
-  return { starterDataAvailable: true, displayName: "Jazz Tinn" };
+  return { starterDataAvailable: false, displayName: "Jazz Tinn" };
 }
 
 export function createWorkspaceState(
-  tasks: Task[] = cloneTasks(seedTasks),
-  rhythms: RhythmDefinition[] = cloneRhythms(seedRhythms),
+  tasks: Task[] = [],
+  rhythms: RhythmDefinition[] = [],
 ): WorkspaceStateV3 {
   const migratedRhythms = [...rhythms];
   for (const task of tasks) {
@@ -825,22 +832,26 @@ function normalizeWorkspaceState(value: WorkspaceStateV3): WorkspaceStateV3 {
       rhythmExceptions = [...rhythmExceptions, { rhythmId: task.rhythmId, occurrenceDate: task.occurrenceDate, kind: "reschedule", replacementDate: task.dueDate, ...(task.dueTime ? { replacementTime: task.dueTime } : {}) }];
     }
   }
+  const tasks = value.tasks.filter((task) => !starterTaskIds.has(task.id));
+  const rhythms = normalizedRhythms.filter((rhythm) => !starterRhythmIds.has(rhythm.id));
+  rhythmExceptions = rhythmExceptions.filter((item) => !starterRhythmIds.has(item.rhythmId));
+  rhythmCompletions = rhythmCompletions.filter((item) => !starterRhythmIds.has(item.rhythmId));
   return {
     ...value,
-    tasks: cloneTasks(value.tasks.filter((task) => !task.generated && !isLegacyRhythmTask(task))),
-    rhythms: normalizedRhythms,
+    tasks: cloneTasks(tasks.filter((task) => !task.generated && !isLegacyRhythmTask(task))),
+    rhythms,
     exceptions: cloneRecord(value.exceptions),
-    completions: { ...cloneRecord(value.completions), ...completionsToRecord(rhythmCompletions) },
+    completions: completionsToRecord(rhythmCompletions),
     rhythmExceptions,
     rhythmCompletions,
     history: value.history.map((snapshot) => ({
       ...snapshot,
-      tasks: cloneTasks(snapshot.tasks.filter((task) => !task.generated && !isLegacyRhythmTask(task))),
-      rhythms: cloneRhythms(snapshot.rhythms),
+      tasks: cloneTasks(snapshot.tasks.filter((task) => !starterTaskIds.has(task.id) && !task.generated && !isLegacyRhythmTask(task))),
+      rhythms: cloneRhythms(snapshot.rhythms.filter((rhythm) => !starterRhythmIds.has(rhythm.id))),
       exceptions: cloneRecord(snapshot.exceptions),
       completions: cloneRecord(snapshot.completions),
-      rhythmExceptions: Array.isArray(snapshot.rhythmExceptions) ? cloneExceptions(snapshot.rhythmExceptions) : recordsToExceptions(snapshot.exceptions),
-      rhythmCompletions: Array.isArray(snapshot.rhythmCompletions) ? cloneCompletions(snapshot.rhythmCompletions) : recordsToCompletions(snapshot.completions),
+      rhythmExceptions: (Array.isArray(snapshot.rhythmExceptions) ? cloneExceptions(snapshot.rhythmExceptions) : recordsToExceptions(snapshot.exceptions)).filter((item) => !starterRhythmIds.has(item.rhythmId)),
+      rhythmCompletions: (Array.isArray(snapshot.rhythmCompletions) ? cloneCompletions(snapshot.rhythmCompletions) : recordsToCompletions(snapshot.completions)).filter((item) => !starterRhythmIds.has(item.rhythmId)),
     })),
   };
 }
@@ -869,11 +880,11 @@ export function migrateWorkspaceData(
   }
 
   const state = createWorkspaceState(
-    legacyTasks.length ? legacyTasks : seedTasks,
-    legacyRhythms.length ? legacyRhythms : seedRhythms,
+    legacyTasks,
+    legacyRhythms,
   );
-  if (isRecord(legacyRhythmsValue) && legacyRhythmsValue.date === toDateKey(new Date()) && Array.isArray(legacyRhythmsValue.done)) {
-    state.completions[toDateKey(new Date())] = legacyRhythmsValue.done.filter((id): id is string => typeof id === "string");
+  if (isRecord(legacyRhythmsValue) && typeof legacyRhythmsValue.date === "string" && isDateKey(legacyRhythmsValue.date) && Array.isArray(legacyRhythmsValue.done)) {
+    state.completions[legacyRhythmsValue.date] = legacyRhythmsValue.done.filter((id): id is string => typeof id === "string");
     state.rhythmCompletions = recordsToCompletions(state.completions);
   }
 
@@ -1063,7 +1074,7 @@ export function validateAiProposal(proposal: AiActionProposal, workItems: Task[]
   if (!Number.isFinite(proposal.confidence) || proposal.confidence < 0.8) return { ok: false, issue: "Rhythm needs more certainty before suggesting this change." };
 
   if (proposal.action.type === "create_task") {
-    if (proposal.action.taskId !== null || !proposal.action.title.trim() || !proposal.action.dueLabel.trim()) {
+    if (proposal.action.taskId !== null || !hasMeaningfulTaskTitle(proposal.action.title) || !proposal.action.dueLabel.trim()) {
       return { ok: false, issue: "The new task details are incomplete." };
     }
     return { ok: true };

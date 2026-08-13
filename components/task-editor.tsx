@@ -1,8 +1,9 @@
 "use client";
 
 import { FormEvent, useState } from "react";
-import { Trash2, X } from "lucide-react";
+import { CalendarDays, ChevronDown, Clock3, Trash2 } from "lucide-react";
 import { Dialog } from "@/components/ui";
+import { BarrelTimePicker } from "@/components/barrel-time-picker";
 import {
   resolveTaskDate,
   toDateKey,
@@ -13,23 +14,37 @@ import {
 
 type TaskEditorProps = {
   task?: Task;
+  initialDraft?: Partial<TaskDraft>;
   onClose: () => void;
   onSave: (draft: TaskDraft) => void;
   onDelete?: () => void;
+  dialogTitle?: string;
+  submitLabel?: string;
 };
 
-export function TaskEditor({ task, onClose, onSave, onDelete }: TaskEditorProps) {
-  const [title, setTitle] = useState(task?.title ?? "");
-  const [project, setProject] = useState(task?.project ?? "Personal");
+export function TaskEditor({ task, initialDraft, onClose, onSave, onDelete, dialogTitle, submitLabel }: TaskEditorProps) {
+  const [title, setTitle] = useState(task?.title ?? initialDraft?.title ?? "");
+  const [project, setProject] = useState(task?.project ?? initialDraft?.project ?? "Personal");
   const [dueDate, setDueDate] = useState(
-    task ? resolveTaskDate(task) ?? toDateKey(new Date()) : toDateKey(new Date()),
+    task ? resolveTaskDate(task) ?? toDateKey(new Date()) : initialDraft?.dueDate ?? toDateKey(new Date()),
   );
-  const [dueTime, setDueTime] = useState(task?.dueTime ?? "");
-  const [estimateMinutes, setEstimateMinutes] = useState(task?.estimateMinutes ?? 25);
-  const [priority, setPriority] = useState<TaskPriority>(task?.priority ?? "medium");
-  const [later, setLater] = useState(task?.later ?? false);
-  const [note, setNote] = useState(task?.note ?? "");
+  const [dueTime, setDueTime] = useState(task?.dueTime ?? initialDraft?.dueTime ?? "");
+  const [estimateMinutes, setEstimateMinutes] = useState(task?.estimateMinutes ?? initialDraft?.estimateMinutes ?? 30);
+  const [priority, setPriority] = useState<TaskPriority>(task?.priority ?? initialDraft?.priority ?? "medium");
+  const [later, setLater] = useState(task?.later ?? initialDraft?.later ?? false);
+  const [note, setNote] = useState(task?.note ?? initialDraft?.note ?? "");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(Boolean(task));
+
+  function setQuickTime(kind: "usual" | "now" | "later" | "evening") {
+    const date = new Date();
+    if (kind === "usual") return setDueTime("08:00");
+    if (kind === "evening") return setDueTime("20:30");
+    if (kind === "later") date.setMinutes(date.getMinutes() + 30);
+    const roundedMinutes = Math.ceil(date.getMinutes() / 5) * 5;
+    date.setMinutes(roundedMinutes, 0, 0);
+    setDueTime(`${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`);
+  }
 
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -47,24 +62,29 @@ export function TaskEditor({ task, onClose, onSave, onDelete }: TaskEditorProps)
   }
 
   return (
-    <Dialog open onClose={onClose} title={task ? "Edit task" : "New task"} className="task-editor-dialog">
-      <form className="quick-add task-editor" onSubmit={submit}>
-        <div className="editor-heading">
-          <div>
-            <span className="section-kicker">{task ? "Edit task" : "New task"}</span>
-            <h2 id="task-editor-title">{task ? "Shape the next step." : "What needs doing?"}</h2>
-          </div>
-          <button className="editor-close" type="button" onClick={onClose} aria-label="Close task editor">
-            <X size={17} />
-          </button>
+    <Dialog open onClose={onClose} title={dialogTitle ?? (task ? "Task details" : "New task")} className="task-editor-dialog ron-task-editor-dialog">
+      <form className="task-editor ron-task-editor" onSubmit={submit}>
+        <div className="editor-scroll-body">
+        <div className="ron-editor-intro">
+          {task ? <span>Edit this task</span> : <span className="ron-editor-intro__spacer" aria-hidden="true" />}
+          <label><span>Name</span><input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} placeholder="What needs doing?" maxLength={240} required /></label>
+          <label><span>Note</span><textarea value={note} onChange={(event) => setNote(event.target.value)} maxLength={320} placeholder="Add optional details" /></label>
         </div>
 
-        <label className="editor-field editor-field--wide">
-          <span>Task</span>
-          <input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Write the task clearly" maxLength={240} required />
-        </label>
+        <section className="ron-editor-section">
+          <span className="section-kicker">Duration</span>
+          <div className="duration-presets" role="group" aria-label="Estimated duration">{[15, 20, 35, 45, 60].map((minutes) => <button type="button" key={minutes} className={estimateMinutes === minutes ? "is-selected" : ""} aria-pressed={estimateMinutes === minutes} onClick={() => setEstimateMinutes(minutes)}>{minutes === 60 ? "1h" : `${minutes}m`}</button>)}</div>
+        </section>
 
-        <div className="editor-grid">
+        <section className="ron-editor-section">
+          <span className="section-kicker">Time</span>
+          <div className="time-shortcuts"><button type="button" className={dueTime === "08:00" ? "is-active" : ""} onClick={() => setQuickTime("usual")}>Usual: 8:00 AM</button><button type="button" onClick={() => setQuickTime("now")}>Now</button><button type="button" onClick={() => setQuickTime("later")}>+30 min</button><button type="button" onClick={() => setQuickTime("evening")}>This evening</button></div>
+          <div className="optional-time-control"><button type="button" aria-pressed={!dueTime} onClick={() => setDueTime("")}>Any time</button>{dueTime ? <button type="button" onClick={() => setDueTime("")}>Clear</button> : <button type="button" onClick={() => setDueTime("12:00")}>Set time</button>}</div>
+          {dueTime ? <BarrelTimePicker value={dueTime} onChange={setDueTime} /> : null}
+        </section>
+
+        <button className="ron-more-toggle" type="button" aria-expanded={moreOpen} onClick={() => setMoreOpen((open) => !open)}><span><CalendarDays size={15} /> Project, date & priority</span><ChevronDown size={16} /></button>
+        {moreOpen ? <div className="editor-grid ron-editor-more">
           <label className="editor-field">
             <span>Project</span>
             <input value={project} onChange={(event) => setProject(event.target.value)} maxLength={120} />
@@ -81,27 +101,13 @@ export function TaskEditor({ task, onClose, onSave, onDelete }: TaskEditorProps)
             <span>Date</span>
             <input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} required />
           </label>
-          <label className="editor-field">
-            <span>Time (optional)</span>
-            <input type="time" value={dueTime} onChange={(event) => setDueTime(event.target.value)} />
-          </label>
-          <label className="editor-field">
-            <span>Estimate</span>
-            <select value={estimateMinutes} onChange={(event) => setEstimateMinutes(Number(event.target.value))}>
-              {[10, 15, 25, 30, 45, 60, 90, 120].map((minutes) => <option key={minutes} value={minutes}>{minutes} min</option>)}
-            </select>
-          </label>
           <label className="editor-check">
             <input type="checkbox" checked={later} onChange={(event) => setLater(event.target.checked)} />
             <span>Keep in Later</span>
           </label>
+        </div> : null}
+
         </div>
-
-        <label className="editor-field editor-field--wide">
-          <span>Note (optional)</span>
-          <textarea value={note} onChange={(event) => setNote(event.target.value)} maxLength={320} placeholder="Useful context, not extra pressure" />
-        </label>
-
         <div className="editor-actions">
           {onDelete ? (
             confirmingDelete ? (
@@ -118,7 +124,7 @@ export function TaskEditor({ task, onClose, onSave, onDelete }: TaskEditorProps)
           ) : <span />}
           <div>
             <button type="button" className="soft-button" onClick={onClose}>Cancel</button>
-            <button className="primary-button" type="submit" disabled={!title.trim()}>{task ? "Save changes" : "Add task"}</button>
+            <button className="primary-button ron-save-task" type="submit" disabled={!title.trim()}><Clock3 size={15} />{submitLabel ?? (task ? "Save task" : "Add task")}</button>
           </div>
         </div>
       </form>

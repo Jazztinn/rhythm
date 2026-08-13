@@ -15,8 +15,10 @@ function TaskCard({ task, onToggle, onOpen, recommended = false, exiting = false
       {task.status === "completed" ? <Check size={15} aria-hidden="true" /> : <Circle size={15} aria-hidden="true" />}
     </button>
     <div className="task-copy">
-      {recommended ? <span className="task-recommendation">Recommended next</span> : null}
-      <span className="task-project">{task.project}</span>
+      <div className="task-labels">
+        {recommended ? <span className="task-recommendation">Recommended next</span> : null}
+        <span className="task-project">{task.project}</span>
+      </div>
       <h3>{task.title}</h3>
       {task.note ? <p>{task.note}</p> : null}
     </div>
@@ -126,11 +128,10 @@ export function TodayView() {
       </article>
     </section>
 
-    <div className="embedded-assist"><span className="section-kicker"><Sparkles size={14} aria-hidden="true" /> Quiet assistance</span><span>Use the current open work as context. Nothing changes until you approve it.</span><Link href={`/chat?prompt=${encodeURIComponent("What is the smallest useful next step from today's open work?")}`}>Ask Rhythm <ArrowUpRight size={14} aria-hidden="true" /></Link></div>
     {routineInsight ? <aside className={`routine-context ${routineInsight.confirmed ? "is-confirmed" : "is-learning"}`} aria-label={routineInsight.confirmed ? "Confirmed routine context" : "Routine observation awaiting confirmation"}>
       <span className="section-kicker">{routineInsight.confirmed ? "A good time to start" : "I’ve noticed something"}</span>
       <div><strong>{routineInsight.pattern.subject}</strong><span>{routineInsight.pattern.value}</span><p>{routineInsight.confirmed ? "You confirmed this pattern. Rhythm may use it gently when suggesting what comes next." : `${routineInsight.pattern.evidence.summary} This will not shape your plan unless you confirm it.`}</p></div>
-      <Link href={routineInsight.confirmed ? `/chat?prompt=${encodeURIComponent(`Is now a useful time for ${routineInsight.pattern.subject}?`)}` : "/settings"}>{routineInsight.confirmed ? "Ask Rhythm" : "Review pattern"}<ArrowUpRight size={14} aria-hidden="true" /></Link>
+      <Link href={routineInsight.confirmed ? `/chat?prompt=${encodeURIComponent(`Is now a useful time for ${routineInsight.pattern.subject}?`)}` : "/settings"} transitionTypes={routineInsight.confirmed ? ["chat-enter"] : undefined}>{routineInsight.confirmed ? "Ask Rhythm" : "Review pattern"}<ArrowUpRight size={14} aria-hidden="true" /></Link>
     </aside> : null}
 
     <section className="content-grid">
